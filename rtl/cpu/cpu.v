@@ -41,6 +41,9 @@ module cpu (
     localparam REG_HL = 3'd6; // Memory address pointed by HL
     localparam REG_A  = 3'd7;
 
+    // ALU Operation Codes
+    localparam ALU_LD = 5'b00001; // Load
+
     // Registers
     reg [15:0] pc;   // Program Counter
     reg [15:0] sp;   // Stack Pointer
@@ -60,6 +63,7 @@ module cpu (
     // Instruction Decoding
     reg [2:0] src;
     reg [2:0] dst;
+    reg [4:0] alu_op;
 
     // Loop
     always @(posedge clk or posedge rst) begin
@@ -78,6 +82,9 @@ module cpu (
             ir <= 8'h00;
             state <= STATE_FETCH;
             fetch_ready <= 1'b0;
+            src <= 3'b000;
+            dst <= 3'b000;
+            alu_op <= 5'b00000;
             we <= 1'b0;
             addr <= 16'h0000;
             data_out <= 8'h00;
@@ -103,6 +110,17 @@ module cpu (
                 
                 // Decode the fetched instruction
                 STATE_DECODE: begin
+                    dst <= ir[5:3]; // Destination register (bits 5-3)
+                    src <= ir[2:0]; // Source register (bits 2-0)
+
+                    if (ir[7:6] == 2'b01) begin
+                        alu_op <= ALU_LD;       // Identify as LD instruction
+                        state <= STATE_EXECUTE; // Move to execute state
+                    end
+                    else begin
+                        state <= STATE_FETCH;
+                    end
+
                 end
                 
                 // Execute the instruction
