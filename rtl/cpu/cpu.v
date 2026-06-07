@@ -8,7 +8,7 @@
 //                internal registers, flags, and memory bus interface.
 // Revision     : 1.0 - Initial implementation
 // =============================================================================
-
+`timescale 1ns / 1ps
 module cpu (
     input wire clk,
     input wire rst,
@@ -159,7 +159,7 @@ module cpu (
                                 end
                                 default: ; // No operation for invalid destination
                             endcase
-                            
+
                             state <= STATE_FETCH; // Return to fetch state after execution 
                         end
                     endcase
