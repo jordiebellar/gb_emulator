@@ -65,6 +65,22 @@ module cpu (
     reg [2:0] dst;
     reg [4:0] alu_op;
 
+    // Helper function to get register value based on identifier
+    function [7:0] get_reg;
+        input [2:0] reg_id;
+            case (reg_id)
+                REG_B:  get_reg = b;
+                REG_C:  get_reg = c;
+                REG_D:  get_reg = d;
+                REG_E:  get_reg = e;
+                REG_H:  get_reg = h;
+                REG_L:  get_reg = l;
+                REG_HL: get_reg = data_in; // Memory read from HL address
+                REG_A:  get_reg = a;
+                default: get_reg = 8'h00;
+            endcase
+    endfunction
+
     // Loop
     always @(posedge clk or posedge rst) begin
         if (rst) begin
@@ -125,6 +141,28 @@ module cpu (
                 
                 // Execute the instruction
                 STATE_EXECUTE: begin
+                    case (alu_op)
+                        ALU_LD: begin
+                            // Handle LD r1, r2 instruction
+                            case (dst)
+                                REG_B:  b <= get_reg(src);
+                                REG_C:  c <= get_reg(src);
+                                REG_D:  d <= get_reg(src);
+                                REG_E:  e <= get_reg(src);
+                                REG_H:  h <= get_reg(src);
+                                REG_L:  l <= get_reg(src);
+                                REG_A:  a <= get_reg(src);
+                                REG_HL: begin
+                                    addr <= {h, l}; // Set address to HL for memory write
+                                    data_out <= get_reg(src); // Set data to be written
+                                    we <= 1'b1; // Enable write
+                                end
+                                default: ; // No operation for invalid destination
+                            endcase
+                            
+                            state <= STATE_FETCH; // Return to fetch state after execution 
+                        end
+                    endcase
                 end
 
                 default: begin
