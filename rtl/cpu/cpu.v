@@ -43,4 +43,47 @@ module cpu (
     // State Machine
     reg [1:0] state;
 
+    // Loop
+    always @(posedge clk or posedge rst) begin
+        if (rst) begin
+            // Reset all registers and state
+            pc <= 16'h0000;
+            sp <= 16'hFFFE;
+            a <= 8'h00;
+            f <= 8'h00;
+            b <= 8'h00;
+            c <= 8'h00;
+            d <= 8'h00;
+            e <= 8'h00;
+            h <= 8'h00;
+            l <= 8'h00;
+            state <= STATE_FETCH;
+            we <= 1'b0;
+            addr <= 16'h0000;
+            data_out <= 8'h00;
+        end
+        else begin
+
+            // State Machine for Fetch, Decode, Execute
+            case (state)
+                // Fetch the next instruction
+                STATE_FETCH: begin
+                end
+                
+                // Decode the fetched instruction
+                STATE_DECODE: begin
+                end
+                
+                // Execute the instruction
+                STATE_EXECUTE: begin
+                end
+
+                default: begin
+                    state <= STATE_FETCH;
+                end
+
+            endcase
+        end
+    end
+
 endmodule
