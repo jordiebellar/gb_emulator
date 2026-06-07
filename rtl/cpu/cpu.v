@@ -17,14 +17,20 @@ module cpu (
     output reg [15:0] addr,
     output reg [7:0] data_out
 );
-    // CPU implementation goes here
 
     // Local Parameters
+
+    // Flag Bit Positions
     localparam F_Z = 7; // Zero Flag
     localparam F_N = 6; // Subtract Flag
     localparam F_H = 5; // Half Carry Flag
     localparam F_C = 4; // Carry Flag
-    
+
+    // CPU States
+    localparam STATE_FETCH = 2'd0;
+    localparam STATE_DECODE = 2'd1;
+    localparam STATE_EXECUTE = 2'd2;
+
     // Registers
     reg [15:0] pc;  // Program Counter
     reg [15:0] sp;  // Stack Pointer
@@ -33,5 +39,8 @@ module cpu (
     reg [7:0]  b, c; // BC Register Pair
     reg [7:0]  d, e; // DE Register Pair
     reg [7:0]  h, l; // HL Register Pair
+
+    // State Machine
+    reg [1:0] state;
 
 endmodule
