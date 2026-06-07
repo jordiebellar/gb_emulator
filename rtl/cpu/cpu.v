@@ -27,9 +27,10 @@ module cpu (
     localparam F_C = 4; // Carry Flag
 
     // CPU States
-    localparam STATE_FETCH   = 2'd0;
-    localparam STATE_DECODE  = 2'd1;
-    localparam STATE_EXECUTE = 2'd2;
+    localparam STATE_FETCH   = 3'd0;
+    localparam STATE_DECODE  = 3'd1;
+    localparam STATE_EXECUTE = 3'd2;
+    localparam STATE_FETCH_IMM = 3'd3; // Fetch Immediate Data
 
     // Register Identifiers
     localparam REG_B  = 3'd0;
@@ -42,7 +43,8 @@ module cpu (
     localparam REG_A  = 3'd7;
 
     // ALU Operation Codes
-    localparam ALU_LD = 5'b00001; // Load
+    localparam ALU_LD     = 5'b00001; // Load
+    localparam ALU_LD_IMM = 5'b00010; // Load Immediate
 
     // Registers
     reg [15:0] pc;   // Program Counter
@@ -55,7 +57,7 @@ module cpu (
     reg [7:0]  ir;   // Instruction Register
 
     // State Machine
-    reg [1:0] state;
+    reg [2:0] state;
 
     // Flags
     reg fetch_ready;
@@ -64,6 +66,9 @@ module cpu (
     reg [2:0] src;
     reg [2:0] dst;
     reg [4:0] alu_op;
+
+    // Immediate value for instructions that require it
+    reg [7:0] n; // Immediate 8-bit value
 
     // Helper function to get register value based on identifier
     function [7:0] get_reg;
@@ -101,6 +106,7 @@ module cpu (
             src <= 3'b000;
             dst <= 3'b000;
             alu_op <= 5'b00000;
+            n <= 8'h00;
             we <= 1'b0;
             addr <= 16'h0000;
             data_out <= 8'h00;
@@ -123,6 +129,21 @@ module cpu (
                         state <= STATE_DECODE; // Move to decode state
                     end
                 end
+
+                // This state is used to fetch immediate data for instructions that require it
+                STATE_FETCH_IMM: begin
+                    if(!fetch_ready) begin
+                        addr <= pc;           // Set address to PC for fetching immediate data
+                        we <= 1'b0;           // Read operation
+                        fetch_ready <= 1'b1;   // Indicate fetch is ready
+                    end
+                    else begin
+                        n <= data_in;         // Load immediate value into 'n'
+                        pc <= pc + 1;          // Increment PC after fetching immediate
+                        fetch_ready <= 1'b0;   // Reset fetch ready for next cycle
+                        state <= STATE_EXECUTE; // Move to execute state to execute instruction with immediate value
+                    end
+                end
                 
                 // Decode the fetched instruction
                 STATE_DECODE: begin
@@ -133,6 +154,13 @@ module cpu (
                         alu_op <= ALU_LD;       // Identify as LD instruction
                         state <= STATE_EXECUTE; // Move to execute state
                     end
+
+                    else if (ir[7:6] == 2'b00 && ir[2:0] == 3'b110) begin
+                        // This is an instruction that requires an immediate value
+                        alu_op <= ALU_LD_IMM; // Identify as LD IMMEDIATE instruction
+                        state <= STATE_FETCH_IMM; // Move to fetch immediate state
+                    end
+
                     else begin
                         state <= STATE_FETCH;
                     end
@@ -159,16 +187,38 @@ module cpu (
                                 end
                                 default: ; // No operation for invalid destination
                             endcase
-
                             state <= STATE_FETCH; // Return to fetch state after execution 
                         end
+
+                        ALU_LD_IMM: begin
+                            // Handle LD r, n instruction
+                            case (dst)
+                                REG_B:  b <= n;
+                                REG_C:  c <= n;
+                                REG_D:  d <= n;
+                                REG_E:  e <= n;
+                                REG_H:  h <= n;
+                                REG_L:  l <= n;
+                                REG_A:  a <= n;
+                                REG_HL: begin
+                                    addr <= {h, l}; // Set address to HL for memory write
+                                    data_out <= n; // Set data to be written
+                                    we <= 1'b1; // Enable write
+                                end
+                                default: ; // No operation for invalid destination
+                            endcase
+                            state <= STATE_FETCH; // Return to fetch state after execution
+                        end
+
+                        default: state <= STATE_FETCH; // For unimplemented ALU operations, return to fetch
+                        
                     endcase
                 end
 
                 default: begin
                     state <= STATE_FETCH;
                 end
-
+    
             endcase
         end
     end

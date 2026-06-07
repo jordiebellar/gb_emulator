@@ -36,7 +36,8 @@ module tb_cpu;
         #20 rst = 0; // Release reset after 20ns
         // Test Case 1: Basic Instruction Fetch and Execute
         // Load a simple instruction into the data_in and observe the CPU behavior
-        #20 data_in = 8'h42; // Example instruction (LD B, D)
+        #20 data_in = 8'h3E; // Example instruction (LD A, n)
+        #20 data_in = 8'h42; // Example instruction (LD B, n)
         // Additional test cases can be added here to cover more instructions and scenarios
         #100;
         $finish; // End simulation after 100ns
