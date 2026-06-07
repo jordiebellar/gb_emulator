@@ -32,16 +32,20 @@ module cpu (
     localparam STATE_EXECUTE = 2'd2;
 
     // Registers
-    reg [15:0] pc;  // Program Counter
-    reg [15:0] sp;  // Stack Pointer
+    reg [15:0] pc;   // Program Counter
+    reg [15:0] sp;   // Stack Pointer
     reg [7:0]  a;    // Accumulator
     reg [7:0]  f;    // Flags Register
     reg [7:0]  b, c; // BC Register Pair
     reg [7:0]  d, e; // DE Register Pair
     reg [7:0]  h, l; // HL Register Pair
+    reg [7:0]  ir;   // Instruction Register
 
     // State Machine
     reg [1:0] state;
+
+    // Flags
+    reg fetch_ready = 1'b0;
 
     // Loop
     always @(posedge clk or posedge rst) begin
@@ -57,17 +61,30 @@ module cpu (
             e <= 8'h00;
             h <= 8'h00;
             l <= 8'h00;
+            ir <= 8'h00;
             state <= STATE_FETCH;
+            fetch_ready <= 1'b0;
             we <= 1'b0;
             addr <= 16'h0000;
             data_out <= 8'h00;
         end
         else begin
-
+            
             // State Machine for Fetch, Decode, Execute
             case (state)
                 // Fetch the next instruction
                 STATE_FETCH: begin
+                    if (!fetch_ready) begin
+                        addr  <= pc;           // Set address to PC for fetching instruction
+                        we    <= 1'b0;         // Read operation
+                        fetch_ready <= 1'b1;   // Indicate fetch is ready
+                    end
+                    else begin
+                        ir <= data_in;         // Load fetched instruction into IR
+                        pc <= pc + 1;          // Increment PC to point to next instruction
+                        fetch_ready <= 1'b0;   // Reset fetch ready for next cycle
+                        state <= STATE_DECODE; // Move to decode state
+                    end
                 end
                 
                 // Decode the fetched instruction
