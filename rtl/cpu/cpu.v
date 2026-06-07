@@ -27,9 +27,19 @@ module cpu (
     localparam F_C = 4; // Carry Flag
 
     // CPU States
-    localparam STATE_FETCH = 2'd0;
-    localparam STATE_DECODE = 2'd1;
+    localparam STATE_FETCH   = 2'd0;
+    localparam STATE_DECODE  = 2'd1;
     localparam STATE_EXECUTE = 2'd2;
+
+    // Register Identifiers
+    localparam REG_B  = 3'd0;
+    localparam REG_C  = 3'd1;
+    localparam REG_D  = 3'd2;
+    localparam REG_E  = 3'd3;
+    localparam REG_H  = 3'd4;
+    localparam REG_L  = 3'd5;
+    localparam REG_HL = 3'd6; // Memory address pointed by HL
+    localparam REG_A  = 3'd7;
 
     // Registers
     reg [15:0] pc;   // Program Counter
@@ -45,7 +55,11 @@ module cpu (
     reg [1:0] state;
 
     // Flags
-    reg fetch_ready = 1'b0;
+    reg fetch_ready;
+
+    // Instruction Decoding
+    reg [2:0] src;
+    reg [2:0] dst;
 
     // Loop
     always @(posedge clk or posedge rst) begin
