@@ -27,6 +27,16 @@ module tb_cpu;
         .data_out(data_out)
     );
 
+    reg [7:0] rom [0:255]; // Simple ROM for testing
+
+    initial begin
+        // Initialize ROM with some test instructions (for example purposes)
+        rom[0] = 8'h06; // LD B, n
+        rom[1] = 8'h0F; // Value to load into B
+        rom[2] = 8'h04; // INC B
+        // Additional instructions can be added here for more comprehensive testing
+    end
+
     initial begin
         $dumpfile("sim/waves/tb_cpu.vcd");
         $dumpvars(0, tb_cpu);
@@ -34,13 +44,14 @@ module tb_cpu;
         rst = 1;
         data_in = 8'h00;
         #20 rst = 0; // Release reset after 20ns
-        // Test Case 1: Basic Instruction Fetch and Execute
-        // Load a simple instruction into the data_in and observe the CPU behavior
-        #20 data_in = 8'h3E; // Example instruction (LD A, n)
-        #20 data_in = 8'h42; // Example instruction (LD B, n)
         // Additional test cases can be added here to cover more instructions and scenarios
-        #100;
+        #300;
         $finish; // End simulation after 100ns
+    end
+
+    always @(*) begin
+        // Simple ROM behavior: output data based on the address
+        data_in = rom[addr];
     end
 
     always #10 clk = ~clk;
