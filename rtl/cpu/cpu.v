@@ -46,6 +46,7 @@ module cpu (
     localparam ALU_LD     = 5'b00001; // Load
     localparam ALU_LD_IMM = 5'b00010; // Load Immediate
     localparam ALU_INC    = 5'b00011; // Increment
+    localparam ALU_DEC    = 5'b00100; // Decrement
 
     // Registers
     reg [15:0] pc;   // Program Counter
@@ -167,6 +168,11 @@ module cpu (
                         state <= STATE_EXECUTE; // Move to execute state
                     end
 
+                    else if (ir[7:6] == 2'b00 && ir[2:0] == 3'b101) begin
+                        alu_op <= ALU_DEC; // Identify as DEC instruction
+                        state <= STATE_EXECUTE; // Move to execute state
+                    end
+
                     else begin
                         state <= STATE_FETCH;
                     end
@@ -218,7 +224,6 @@ module cpu (
 
                         ALU_INC: begin
                             // Handle INC r instruction
-
                             f[F_Z] <= (get_reg(dst) + 1 == 8'h00); // Set Zero flag if result is zero
                             f[F_H] <= ((get_reg(dst) & 4'hF) + 1 > 4'hF); // Set Half Carry flag if there is a carry from bit 3
                             f[F_N] <= 1'b0; // Reset Subtract flag for INC
@@ -244,6 +249,42 @@ module cpu (
                                 end
                                 REG_A:  begin
                                     a <= get_reg(dst) + 1; // Update register with result after flags are set
+                                end
+                                REG_HL: begin
+                                    // We will be back to this
+                                end
+                                default: ; // No operation for invalid destination
+                            endcase
+                            state <= STATE_FETCH; // Return to fetch state after execution
+                        end
+
+                        ALU_DEC: begin
+                            // Handle DEC r instruction
+                            f[F_Z] <= (get_reg(dst) - 1 == 8'h00); // Set Zero flag if result is zero
+                            f[F_H] <= ((get_reg(dst) & 4'hF) == 4'h0); // Set Half Carry flag if there is a borrow from bit 4
+                            f[F_N] <= 1'b1; // Set Subtract flag for DEC
+
+                            case (dst)
+                                REG_B:  begin
+                                    b <= get_reg(dst) - 1; // Update register with result after flags are set
+                                end
+                                REG_C:  begin
+                                    c <= get_reg(dst) - 1; // Update register with result after flags are set
+                                end
+                                REG_D:  begin
+                                    d <= get_reg(dst) - 1; // Update register with result after flags are set
+                                end
+                                REG_E:  begin
+                                    e <= get_reg(dst) - 1; // Update register with result after flags are set
+                                end
+                                REG_H:  begin
+                                    h <= get_reg(dst) - 1; // Update register with result after flags are set
+                                end
+                                REG_L:  begin
+                                    l <= get_reg(dst) - 1; // Update register with result after flags are set
+                                end
+                                REG_A:  begin
+                                    a <= get_reg(dst) - 1; // Update register with result after flags are set
                                 end
                                 REG_HL: begin
                                     // We will be back to this

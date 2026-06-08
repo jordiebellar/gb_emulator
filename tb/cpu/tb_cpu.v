@@ -32,8 +32,8 @@ module tb_cpu;
     initial begin
         // Initialize ROM with some test instructions (for example purposes)
         rom[0] = 8'h06; // LD B, n
-        rom[1] = 8'h0F; // Value to load into B
-        rom[2] = 8'h04; // INC B
+        rom[1] = 8'h10; // Value to load into B
+        rom[2] = 8'h05; // DEC B
         // Additional instructions can be added here for more comprehensive testing
     end
 
