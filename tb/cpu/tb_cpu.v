@@ -31,11 +31,28 @@ module tb_cpu;
 
     initial begin
         // Initialize ROM with some test instructions (for example purposes)
-        rom[0] = 8'h06; // LD B, n
-        rom[1] = 8'h02; // Value to load into B
-        rom[2] = 8'h3C; // INC A
-        rom[3] = 8'h90; // SUB A, B
-        // Additional instructions can be added here for more comprehensive testing
+        // Test AND
+        rom[0] = 8'h3E; // LD A, n
+        rom[1] = 8'hFF; // Value to load into A
+        rom[2] = 8'h06; // LD B, n
+        rom[3] = 8'h0F; // Value to load into B
+        rom[4] = 8'hA0; // AND A, B
+        // Test XOR
+        rom[5] = 8'hAF; // XOR A, A (should result in 0)
+        // Test OR
+        rom[6] = 8'h3E; // LD A, n
+        rom[7] = 8'hF0; // Value to load into A
+        rom[8] = 8'h06; // LD B, n
+        rom[9] = 8'h0F; // Value to load into B
+        rom[10] = 8'hB0; // OR A, B
+        // Zero A
+        rom[11] = 8'hAF; // XOR A, A (should result in 0)
+        // Test CP
+        rom[12] = 8'h3E; // LD A, n
+        rom[13] = 8'h05; // Value to load into A
+        rom[14] = 8'h06; // LD B, n
+        rom[15] = 8'h05; // Value to load into B
+        rom[16] = 8'hB8; // CP A, B (should set Zero flag)
     end
 
     initial begin
@@ -46,7 +63,7 @@ module tb_cpu;
         data_in = 8'h00;
         #20 rst = 0; // Release reset after 20ns
         // Additional test cases can be added here to cover more instructions and scenarios
-        #500;
+        #1500;
         $finish; // End simulation after 100ns
     end
 

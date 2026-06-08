@@ -49,6 +49,10 @@ module cpu (
     localparam ALU_DEC    = 5'b00100; // Decrement
     localparam ALU_ADD    = 5'b00101; // Add
     localparam ALU_SUB    = 5'b00110; // Subtract
+    localparam ALU_AND    = 5'b00111; // AND
+    localparam ALU_XOR    = 5'b01000; // XOR
+    localparam ALU_OR     = 5'b01001; // OR
+    localparam ALU_CP     = 5'b01010; // Compare
 
     // Registers
     reg [15:0] pc;   // Program Counter
@@ -185,6 +189,26 @@ module cpu (
                         state <= STATE_EXECUTE; // Move to execute state
                     end
 
+                    else if (ir[7:6] == 2'b10 && ir[5:3] == 3'b100) begin
+                        alu_op <= ALU_AND; // Identify as AND instruction
+                        state <= STATE_EXECUTE; // Move to execute state
+                    end
+
+                    else if (ir[7:6] == 2'b10 && ir[5:3] == 3'b101) begin
+                        alu_op <= ALU_XOR; // Identify as XOR instruction
+                        state <= STATE_EXECUTE; // Move to execute state
+                    end
+
+                    else if (ir[7:6] == 2'b10 && ir[5:3] == 3'b110) begin
+                        alu_op <= ALU_OR; // Identify as OR instruction
+                        state <= STATE_EXECUTE; // Move to execute state
+                    end
+
+                    else if (ir[7:6] == 2'b10 && ir[5:3] == 3'b111) begin
+                        alu_op <= ALU_CP; // Identify as CP instruction
+                        state <= STATE_EXECUTE; // Move to execute state
+                    end
+
                     else begin
                         state <= STATE_FETCH;
                     end
@@ -308,7 +332,7 @@ module cpu (
 
                         ALU_ADD: begin
                             // Handle ADD A, r instruction
-                            f[F_Z] <= (a + get_reg(src) == 8'h00); // Set Zero flag if result is zero
+                            f[F_Z] <= ((a + get_reg(src)) == 8'h00); // Set Zero flag if result is zero
                             f[F_H] <= ((a & 4'hF) + (get_reg(src) & 4'hF) > 4'hF); // Set Half Carry flag if there is a carry from bit 3
                             f[F_C] <= ({1'b0, a} + {1'b0, get_reg(src)} > 9'h0FF); // Set Carry flag if there is a carry from bit 7
                             f[F_N] <= 1'b0; // Reset Subtract flag for ADD
@@ -319,12 +343,55 @@ module cpu (
 
                         ALU_SUB: begin
                             // Handle SUB A, r instruction
-                            f[F_Z] <= (a - get_reg(src) == 8'h00); // Set Zero flag if result is zero
+                            f[F_Z] <= ((a - get_reg(src)) == 8'h00); // Set Zero flag if result is zero
                             f[F_H] <= ((a & 4'hF) < (get_reg(src) & 4'hF)); // Set Half Carry flag if there is a borrow from bit 4
                             f[F_C] <= (a < get_reg(src)); // Set Carry flag if there is a borrow from bit 7
                             f[F_N] <= 1'b1; // Set Subtract flag for SUB
 
                             a <= a - get_reg(src); // Update Accumulator with result after flags are set
+                            state <= STATE_FETCH; // Return to fetch state after execution
+                        end
+
+                        ALU_AND: begin
+                            // Handle AND A, r instruction
+                            f[F_Z] <= ((a & get_reg(src)) == 8'h00); // Set Zero flag if result is zero
+                            f[F_H] <= 1'b1; // Set Half Carry flag for AND
+                            f[F_C] <= 1'b0; // Reset Carry flag for AND
+                            f[F_N] <= 1'b0; // Reset Subtract flag for AND
+
+                            a <= a & get_reg(src); // Update Accumulator with result after flags are set
+                            state <= STATE_FETCH; // Return to fetch state after execution
+                        end
+
+                        ALU_XOR: begin
+                            // Handle XOR A, r instruction
+                            f[F_Z] <= ((a ^ get_reg(src)) == 8'h00); // Set Zero flag if result is zero
+                            f[F_H] <= 1'b0; // Reset Half Carry flag for XOR
+                            f[F_C] <= 1'b0; // Reset Carry flag for XOR
+                            f[F_N] <= 1'b0; // Reset Subtract flag for XOR
+
+                            a <= a ^ get_reg(src); // Update Accumulator with result after flags are set
+                            state <= STATE_FETCH; // Return to fetch state after execution
+                        end
+
+                        ALU_OR: begin
+                            // Handle OR A, r instruction
+                            f[F_Z] <= ((a | get_reg(src)) == 8'h00); // Set Zero flag if result is zero
+                            f[F_H] <= 1'b0; // Reset Half Carry flag for OR
+                            f[F_C] <= 1'b0; // Reset Carry flag for OR
+                            f[F_N] <= 1'b0; // Reset Subtract flag for OR
+
+                            a <= a | get_reg(src); // Update Accumulator with result after flags are set
+                            state <= STATE_FETCH; // Return to fetch state after execution
+                        end
+
+                        ALU_CP: begin
+                            // Handle CP A, r instruction
+                            f[F_Z] <= ((a - get_reg(src)) == 8'h00); // Set Zero flag if result is zero
+                            f[F_H] <= ((a & 4'hF) < (get_reg(src) & 4'hF)); // Set Half Carry flag if there is a borrow from bit 4
+                            f[F_C] <= (a < get_reg(src)); // Set Carry flag if there is a borrow from bit 7
+                            f[F_N] <= 1'b1; // Set Subtract flag for CP
+
                             state <= STATE_FETCH; // Return to fetch state after execution
                         end
 
