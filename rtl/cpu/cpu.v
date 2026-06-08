@@ -48,6 +48,7 @@ module cpu (
     localparam ALU_INC    = 5'b00011; // Increment
     localparam ALU_DEC    = 5'b00100; // Decrement
     localparam ALU_ADD    = 5'b00101; // Add
+    localparam ALU_SUB    = 5'b00110; // Subtract
 
     // Registers
     reg [15:0] pc;   // Program Counter
@@ -176,6 +177,11 @@ module cpu (
 
                     else if (ir[7:6] == 2'b10 && ir[5:3] == 3'b000) begin
                         alu_op <= ALU_ADD; // Identify as ADD instruction
+                        state <= STATE_EXECUTE; // Move to execute state
+                    end
+
+                    else if (ir[7:6] == 2'b10 && ir[5:3] == 3'b010) begin
+                        alu_op <= ALU_SUB; // Identify as SUB instruction
                         state <= STATE_EXECUTE; // Move to execute state
                     end
 
@@ -308,6 +314,17 @@ module cpu (
                             f[F_N] <= 1'b0; // Reset Subtract flag for ADD
 
                             a <= a + get_reg(src); // Update Accumulator with result after flags are set
+                            state <= STATE_FETCH; // Return to fetch state after execution
+                        end
+
+                        ALU_SUB: begin
+                            // Handle SUB A, r instruction
+                            f[F_Z] <= (a - get_reg(src) == 8'h00); // Set Zero flag if result is zero
+                            f[F_H] <= ((a & 4'hF) < (get_reg(src) & 4'hF)); // Set Half Carry flag if there is a borrow from bit 4
+                            f[F_C] <= (a < get_reg(src)); // Set Carry flag if there is a borrow from bit 7
+                            f[F_N] <= 1'b1; // Set Subtract flag for SUB
+
+                            a <= a - get_reg(src); // Update Accumulator with result after flags are set
                             state <= STATE_FETCH; // Return to fetch state after execution
                         end
 
