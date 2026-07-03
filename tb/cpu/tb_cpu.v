@@ -31,13 +31,10 @@ module tb_cpu;
 
     initial begin
         // Initialize ROM with some test instructions (for example purposes)
-        rom[0] = 8'hC3; // JP nn
-        rom[1] = 8'h05; // low byte  - jump to 0x0005
-        rom[2] = 8'h00; // high byte
-        rom[3] = 8'h00; // NOP (padding)
-        rom[4] = 8'h00; // NOP (padding)
-        rom[5] = 8'h3E; // LD A, n
-        rom[6] = 8'h42; // n = 0x42
+        rom[0] = 8'h3E; // LD A, n
+        rom[1] = 8'h00; // n = 0x00
+        rom[2] = 8'h18; // JR e
+        rom[3] = 8'hFC; // offset = -4 (two's complement)
     end
 
     initial begin

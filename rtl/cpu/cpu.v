@@ -54,6 +54,7 @@ module cpu (
     localparam ALU_OR     = 5'b01001; // OR
     localparam ALU_CP     = 5'b01010; // Compare
     localparam ALU_JP_IMM = 5'b01011; // Jump to Immediate Address
+    localparam ALU_JR     = 5'b01100; // Jump Relative
 
     // Registers
     reg [15:0] pc;   // Program Counter
@@ -192,6 +193,7 @@ module cpu (
                     else if (ir[7:6] == 2'b00 && ir[2:0] == 3'b110) begin
                         // This is an instruction that requires an immediate value
                         alu_op <= ALU_LD_IMM; // Identify as LD IMMEDIATE instruction
+                        imm16 <= 1'b0; // Set imm16 to indicate that we need to fetch an 8-bit immediate value
                         state <= STATE_FETCH_IMM; // Move to fetch immediate state
                     end
 
@@ -238,6 +240,12 @@ module cpu (
                     else if (ir[7:6] == 2'b11 && ir[2:0] == 3'b011) begin
                         alu_op <= ALU_JP_IMM; // Identify as JP instruction with immediate value
                         imm16 <= 1'b1; // Set imm16 to indicate that we need to
+                        state <= STATE_FETCH_IMM; // Move to fetch immediate state
+                    end
+
+                    else if (ir[7:6] == 2'b00 && ir[5:3] == 3'b011 && ir[2:0] == 3'b000) begin
+                        alu_op <= ALU_JR; // Identify as JR instruction
+                        imm16 <= 1'b0; // Set imm16 to indicate that we need to fetch an 8-bit immediate value
                         state <= STATE_FETCH_IMM; // Move to fetch immediate state
                     end
 
@@ -430,6 +438,12 @@ module cpu (
                         ALU_JP_IMM: begin
                             // Handle JP nn instruction
                             pc <= nn; // Set PC to the immediate 16-bit value
+                            state <= STATE_FETCH; // Return to fetch state after execution
+                        end
+
+                        ALU_JR: begin
+                            // Handle JR n instruction
+                            pc <= pc + {{8{n[7]}}, n}; // Sign-extend the 8-bit immediate value and add to PC
                             state <= STATE_FETCH; // Return to fetch state after execution
                         end
 
