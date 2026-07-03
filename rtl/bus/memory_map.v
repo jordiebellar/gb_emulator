@@ -2,10 +2,11 @@
 // Project      : GameBoy Emulator
 // File         : memory_map.v
 // Author       : Jordie Bellar
-// Date         : 2026-06-06
+// Date         : 2026-07-03
 // Description  : Memory map for the GameBoy emulator.
 // Revision     : 1.0 - Initial implementation
 // =============================================================================
+`timescale 1ns / 1ps
 module memory_map (
     input wire clk,
     input wire rst,
