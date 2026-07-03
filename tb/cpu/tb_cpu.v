@@ -27,28 +27,24 @@ module tb_cpu;
         .data_out(data_out)
     );
 
-    reg [7:0] rom [0:255]; // Simple ROM for testing
+    reg [7:0] ram [0:65535]; // Full 64KB address space
 
     initial begin
-        // Initialize ROM with some test instructions (for example purposes)
-        rom[0] = 8'h3E; // LD A, n
-        rom[1] = 8'h42; // n = 0x42
-        rom[2] = 8'h20; // JR NZ, e
-        rom[3] = 8'h03; // offset = 3 (two's complement)
-        rom[4] = 8'h00; // NOP
-        rom[5] = 8'h00; // NOP
-        rom[6] = 8'h00; // NOP
-        rom[7] = 8'h97; // SUB A, A
-        rom[8] = 8'h28; // JR Z, e
-        rom[9] = 8'hF6; // offset = -10 (two's complement)
-        rom[10] = 8'h00; // NOP
-        rom[11] = 8'h00; // NOP
-        rom[12] = 8'h00; // NOP
+        // Copy ROM contents into RAM
+        ram[0] = 8'hCD;
+        ram[1] = 8'h05;
+        ram[2] = 8'h00;
+        ram[3] = 8'hC3; // JP nn
+        ram[4] = 8'h03; // low byte - jump to 0x0003
+        ram[5] = 8'h00; // high byte
+        ram[6] = 8'hC9; // RET
+
     end
 
     initial begin
         $dumpfile("sim/waves/tb_cpu.vcd");
         $dumpvars(0, tb_cpu);
+        $monitor("t=%0t pc=%h sp=%h ret_addr=%h", $time, uut.pc, uut.sp, uut.ret_addr);
         clk = 0;
         rst = 1;
         data_in = 8'h00;
@@ -59,8 +55,12 @@ module tb_cpu;
     end
 
     always @(*) begin
-        // Simple ROM behavior: output data based on the address
-        data_in = rom[addr];
+        data_in = ram[addr];
+    end
+
+    always @(negedge clk) begin
+        if (we)
+            ram[addr] <= data_out;
     end
 
     always #10 clk = ~clk;

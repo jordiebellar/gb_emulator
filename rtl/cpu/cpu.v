@@ -31,6 +31,8 @@ module cpu (
     localparam STATE_DECODE  = 3'd1;
     localparam STATE_EXECUTE = 3'd2;
     localparam STATE_FETCH_IMM = 3'd3; // Fetch Immediate Data
+    localparam STATE_STACK_PUSH = 3'd4; // Push to Stack
+    localparam STATE_STACK_POP  = 3'd5; // Pop from Stack
 
     // Register Identifiers
     localparam REG_B  = 3'd0;
@@ -56,6 +58,8 @@ module cpu (
     localparam ALU_JP_IMM = 5'b01011; // Jump to Immediate Address
     localparam ALU_JR     = 5'b01100; // Jump Relative
     localparam ALU_JR_CC  = 5'b01101; // Jump Relative Conditional
+    localparam ALU_CALL   = 5'b01110; // Push to Stack
+    localparam ALU_RET    = 5'b01111; // Pop from Stack
 
     // Registers
     reg [15:0] pc;   // Program Counter
@@ -85,6 +89,11 @@ module cpu (
 
     // 16-bit Immeditate value for instructions that require it
     reg [15:0] nn; // Immediate 16-bit value
+
+    // Stack State Registers
+    reg [15:0] ret_addr; // Return address for CALL and RET instructions
+    reg second_stack_fetch; // Flag to indicate second fetch for 16-bit immediate values
+    reg push_after_imm; // Flag to indicate that we need to push return address after fetching immediate value
 
     // Helper function to get register value based on identifier
     function [7:0] get_reg;
@@ -126,6 +135,9 @@ module cpu (
             alu_op <= 5'b00000;
             n <= 8'h00;
             nn <= 16'h0000;
+            ret_addr <= 16'h0000;
+            second_stack_fetch <= 1'b0;
+            push_after_imm <= 1'b0;
             we <= 1'b0;
             addr <= 16'h0000;
             data_out <= 8'h00;
@@ -177,7 +189,14 @@ module cpu (
                         second_fetch <= 1'b0;    // Reset second fetch for next instruction
                         fetch_ready <= 1'b0;   // Reset fetch ready for next cycle
                         imm16 <= 1'b0;          // Reset imm16 for next instruction
-                        state <= STATE_EXECUTE; // Move to execute state to execute instruction with immediate value
+                        if(push_after_imm) begin
+                            ret_addr <= pc + 1;        // Store return address for CALL instruction
+                            push_after_imm <= 1'b0; // Reset push_after_imm flag
+                            state <= STATE_STACK_PUSH; // Move to stack push state to push return address onto stack
+                        end
+                        else begin
+                            state <= STATE_EXECUTE; // Move to execute state to execute instruction with immediate value
+                        end
                     end  
                 end
                 
@@ -254,6 +273,18 @@ module cpu (
                         alu_op <= ALU_JR_CC; // Identify as JR conditional instruction
                         imm16 <= 1'b0; // Set imm16 to indicate that we need to fetch an 8-bit immediate value
                         state <= STATE_FETCH_IMM; // Move to fetch immediate state
+                    end
+
+                    else if (ir[7:6] == 2'b11 && ir[5:3] == 3'b001 && ir[2:0] == 3'b101) begin
+                        alu_op <= ALU_CALL; // Identify as CALL instruction
+                        imm16 <= 1'b1; // Set imm16 to indicate that we need to fetch a 16-bit immediate value
+                        push_after_imm <= 1'b1; // Set flag to push return address after fetching immediate value
+                        state <= STATE_FETCH_IMM; // Move to fetch immediate state
+                    end
+
+                    else if (ir[7:6] == 2'b11 && ir[5:3] == 3'b001 && ir[2:0] == 3'b001) begin
+                        alu_op <= ALU_RET; // Identify as RET instruction
+                        state <= STATE_STACK_POP; // Move to stack pop state to retrieve return address
                     end
 
                     else begin
@@ -466,14 +497,90 @@ module cpu (
                             state <= STATE_FETCH; // Return to fetch state after execution
                         end
 
+                        ALU_CALL: begin
+                            // Handle CALL nn instruction
+                            // The return address (current PC) will be pushed onto the stack in the STATE_STACK_PUSH state
+                            pc <= nn; // Set PC to the immediate 16-bit value
+                            state <= STATE_FETCH; // Return to fetch state after execution
+                        end
+
+                        ALU_RET: begin
+                            // Handle RET instruction
+                            pc <= ret_addr; // Set PC to the return address popped from the stack
+                            state <= STATE_FETCH; // Return to fetch state after execution
+                        end
+
                         default: state <= STATE_FETCH; // For unimplemented ALU operations, return to fetch
                         
                     endcase
+                end
+                
+                STATE_STACK_PUSH: begin
+                    // Handle pushing a 16-bit value onto the stack
+                    if (!second_stack_fetch) begin
+                        if(!fetch_ready) begin
+                            sp <= sp - 1; // Decrement SP by 1 after pushing high byte                    
+                            fetch_ready <= 1'b1; // Indicate fetch is ready
+                        end
+                        else begin
+                            we <= 1'b1; // Enable write
+                            addr <= sp; // Set address to SP
+                            data_out <= ret_addr[15:8];
+                            fetch_ready <= 1'b0; // Reset fetch ready for next cycle
+                            second_stack_fetch <= 1'b1;
+                        end
+                    end
+                    else if (second_stack_fetch) begin
+                        if(!fetch_ready) begin
+                            sp <= sp - 1; // Decrement SP by 1 after pushing low byte                          
+                            fetch_ready <= 1'b1; // Indicate fetch is ready
+                        end
+                        else begin
+                            we <= 1'b1; // Enable write
+                            addr <= sp; // Set address to SP
+                            data_out <= ret_addr[7:0];
+                            fetch_ready <= 1'b0; // Reset fetch ready for next cycle
+                            second_stack_fetch <= 1'b0; // Reset for next push
+                            state <= STATE_EXECUTE;
+                        end
+                    end
+                end
+
+                STATE_STACK_POP: begin
+                    // Handle popping a 16-bit value from the stack
+                    if (!second_stack_fetch) begin
+                        if(!fetch_ready) begin
+                            addr <= sp; // Set address to SP
+                            we <= 1'b0; // Read operation
+                            fetch_ready <= 1'b1; // Indicate fetch is ready
+                        end
+                        else begin
+                            ret_addr[7:0] <= data_in; // Read low byte
+                            sp <= sp + 1; // Increment SP by 1 after popping low byte
+                            fetch_ready <= 1'b0; // Reset fetch ready for next cycle
+                            second_stack_fetch <= 1'b1;
+                        end
+                    end
+                    else if (second_stack_fetch) begin
+                        if(!fetch_ready) begin
+                            addr <= sp; // Set address to SP
+                            we <= 1'b0; // Read operation
+                            fetch_ready <= 1'b1; // Indicate fetch is ready
+                        end
+                        else begin
+                            ret_addr[15:8] <= data_in; // Read high byte
+                            sp <= sp + 1; // Increment SP by 1 after popping high byte
+                            fetch_ready <= 1'b0; // Reset fetch ready for next cycle
+                            second_stack_fetch <= 1'b0; // Reset for next pop
+                            state <= STATE_EXECUTE;
+                        end
+                    end
                 end
 
                 default: begin
                     state <= STATE_FETCH;
                 end
+                
     
             endcase
         end
