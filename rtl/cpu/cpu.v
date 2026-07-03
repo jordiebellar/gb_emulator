@@ -53,6 +53,7 @@ module cpu (
     localparam ALU_XOR    = 5'b01000; // XOR
     localparam ALU_OR     = 5'b01001; // OR
     localparam ALU_CP     = 5'b01010; // Compare
+    localparam ALU_JP_IMM = 5'b01011; // Jump to Immediate Address
 
     // Registers
     reg [15:0] pc;   // Program Counter
@@ -69,6 +70,8 @@ module cpu (
 
     // Flags
     reg fetch_ready;
+    reg second_fetch;
+    reg imm16;
 
     // Instruction Decoding
     reg [2:0] src;
@@ -77,6 +80,9 @@ module cpu (
 
     // Immediate value for instructions that require it
     reg [7:0] n; // Immediate 8-bit value
+
+    // 16-bit Immeditate value for instructions that require it
+    reg [15:0] nn; // Immediate 16-bit value
 
     // Helper function to get register value based on identifier
     function [7:0] get_reg;
@@ -111,10 +117,13 @@ module cpu (
             ir <= 8'h00;
             state <= STATE_FETCH;
             fetch_ready <= 1'b0;
+            second_fetch <= 1'b0;
+            imm16 <= 1'b0;
             src <= 3'b000;
             dst <= 3'b000;
             alu_op <= 5'b00000;
             n <= 8'h00;
+            nn <= 16'h0000;
             we <= 1'b0;
             addr <= 16'h0000;
             data_out <= 8'h00;
@@ -145,12 +154,29 @@ module cpu (
                         we <= 1'b0;           // Read operation
                         fetch_ready <= 1'b1;   // Indicate fetch is ready
                     end
-                    else begin
-                        n <= data_in;         // Load immediate value into 'n'
-                        pc <= pc + 1;          // Increment PC after fetching immediate
-                        fetch_ready <= 1'b0;   // Reset fetch ready for next cycle
-                        state <= STATE_EXECUTE; // Move to execute state to execute instruction with immediate value
+                    else if(fetch_ready && !second_fetch) begin
+                        if(!imm16) begin
+                            n <= data_in;        // Load 8-bit immediate value into 'n'
+                            pc <= pc + 1;        // Increment PC after fetching immediate
+                            fetch_ready <= 1'b0; // Reset fetch ready for next cycle
+                            state <= STATE_EXECUTE; // Move to execute state to execute instruction with immediate value
+                        end
+                        else begin
+                            nn[7:0] <= data_in;    // Load lower 8 bits of 16-bit immediate value into 'nn'
+                            pc <= pc + 1;          // Increment PC after fetching immediate
+                            second_fetch <= 1'b1;    // Set second fetch for next instruction
+                            fetch_ready <= 1'b0;   // Reset fetch ready for next cycle
+                        end
+
                     end
+                    else if(fetch_ready && second_fetch) begin
+                        nn[15:8] <= data_in;   // Load upper 8 bits of 16-bit immediate value into 'nn'
+                        pc <= pc + 1;          // Increment PC after fetching immediate
+                        second_fetch <= 1'b0;    // Reset second fetch for next instruction
+                        fetch_ready <= 1'b0;   // Reset fetch ready for next cycle
+                        imm16 <= 1'b0;          // Reset imm16 for next instruction
+                        state <= STATE_EXECUTE; // Move to execute state to execute instruction with immediate value
+                    end  
                 end
                 
                 // Decode the fetched instruction
@@ -207,6 +233,12 @@ module cpu (
                     else if (ir[7:6] == 2'b10 && ir[5:3] == 3'b111) begin
                         alu_op <= ALU_CP; // Identify as CP instruction
                         state <= STATE_EXECUTE; // Move to execute state
+                    end
+
+                    else if (ir[7:6] == 2'b11 && ir[2:0] == 3'b011) begin
+                        alu_op <= ALU_JP_IMM; // Identify as JP instruction with immediate value
+                        imm16 <= 1'b1; // Set imm16 to indicate that we need to
+                        state <= STATE_FETCH_IMM; // Move to fetch immediate state
                     end
 
                     else begin
@@ -392,6 +424,12 @@ module cpu (
                             f[F_C] <= (a < get_reg(src)); // Set Carry flag if there is a borrow from bit 7
                             f[F_N] <= 1'b1; // Set Subtract flag for CP
 
+                            state <= STATE_FETCH; // Return to fetch state after execution
+                        end
+
+                        ALU_JP_IMM: begin
+                            // Handle JP nn instruction
+                            pc <= nn; // Set PC to the immediate 16-bit value
                             state <= STATE_FETCH; // Return to fetch state after execution
                         end
 
