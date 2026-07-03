@@ -55,6 +55,7 @@ module cpu (
     localparam ALU_CP     = 5'b01010; // Compare
     localparam ALU_JP_IMM = 5'b01011; // Jump to Immediate Address
     localparam ALU_JR     = 5'b01100; // Jump Relative
+    localparam ALU_JR_CC  = 5'b01101; // Jump Relative Conditional
 
     // Registers
     reg [15:0] pc;   // Program Counter
@@ -245,6 +246,12 @@ module cpu (
 
                     else if (ir[7:6] == 2'b00 && ir[5:3] == 3'b011 && ir[2:0] == 3'b000) begin
                         alu_op <= ALU_JR; // Identify as JR instruction
+                        imm16 <= 1'b0; // Set imm16 to indicate that we need to fetch an 8-bit immediate value
+                        state <= STATE_FETCH_IMM; // Move to fetch immediate state
+                    end
+
+                    else if (ir[7:6] == 2'b00 && ir[5:3] >= 3'b100 && ir[2:0] == 3'b000) begin
+                        alu_op <= ALU_JR_CC; // Identify as JR conditional instruction
                         imm16 <= 1'b0; // Set imm16 to indicate that we need to fetch an 8-bit immediate value
                         state <= STATE_FETCH_IMM; // Move to fetch immediate state
                     end
@@ -444,6 +451,18 @@ module cpu (
                         ALU_JR: begin
                             // Handle JR n instruction
                             pc <= pc + {{8{n[7]}}, n}; // Sign-extend the 8-bit immediate value and add to PC
+                            state <= STATE_FETCH; // Return to fetch state after execution
+                        end
+
+                        ALU_JR_CC: begin
+                            // Handle JR cc, n instruction
+                            case (ir[5:3]) // Check the condition code
+                                3'b100: if (!f[F_Z]) pc <= pc + {{8{n[7]}}, n}; // JR NZ, n
+                                3'b101: if (f[F_Z]) pc <= pc + {{8{n[7]}}, n};  // JR Z, n
+                                3'b110: if (!f[F_C]) pc <= pc + {{8{n[7]}}, n}; // JR NC, n
+                                3'b111: if (f[F_C]) pc <= pc + {{8{n[7]}}, n};  // JR C, n
+                                default: ; // No operation for invalid condition codes
+                            endcase
                             state <= STATE_FETCH; // Return to fetch state after execution
                         end
 

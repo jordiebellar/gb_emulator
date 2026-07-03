@@ -32,9 +32,18 @@ module tb_cpu;
     initial begin
         // Initialize ROM with some test instructions (for example purposes)
         rom[0] = 8'h3E; // LD A, n
-        rom[1] = 8'h00; // n = 0x00
-        rom[2] = 8'h18; // JR e
-        rom[3] = 8'hFC; // offset = -4 (two's complement)
+        rom[1] = 8'h42; // n = 0x42
+        rom[2] = 8'h20; // JR NZ, e
+        rom[3] = 8'h03; // offset = 3 (two's complement)
+        rom[4] = 8'h00; // NOP
+        rom[5] = 8'h00; // NOP
+        rom[6] = 8'h00; // NOP
+        rom[7] = 8'h97; // SUB A, A
+        rom[8] = 8'h28; // JR Z, e
+        rom[9] = 8'hF6; // offset = -10 (two's complement)
+        rom[10] = 8'h00; // NOP
+        rom[11] = 8'h00; // NOP
+        rom[12] = 8'h00; // NOP
     end
 
     initial begin
