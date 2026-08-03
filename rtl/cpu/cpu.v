@@ -70,6 +70,8 @@ module cpu (
     localparam ALU_EI     = 5'b10010; // Enable Interrupts
     localparam ALU_RETI   = 5'b10011; // RETI
     localparam ALU_LD_SP  = 5'b10100; // Load into stack pointer
+    localparam ALU_PUSH   = 5'b10101; // PUSH register pairs
+    localparam ALU_POP    = 5'b10111; // POP register pair from stack
 
     // Registers
     reg [15:0] pc;   // Program Counter
@@ -368,6 +370,22 @@ module cpu (
                         state <= STATE_FETCH_IMM; // Move to fetch immediate state
                     end
 
+                    else if (ir[7:6] == 2'b11 && ir [2:0] == 3'b101 && ir[5:3] != 3'b001) begin
+                        case (ir[5:3])
+                            3'b000: ret_addr <= {b, c};
+                            3'b010: ret_addr <= {d, e};
+                            3'b100: ret_addr <= {h, l};
+                            3'b110: ret_addr <= {a, f};
+                        endcase
+                        alu_op <= ALU_PUSH;
+                        state <= STATE_STACK_PUSH;
+                    end
+
+                    else if(ir[7:6] == 2'b11 && ir[2:0] == 3'b001 && ir[5:3] != 3'b001) begin
+                        alu_op <= ALU_POP;
+                        state <= STATE_STACK_POP;
+                    end
+
                     else begin
                         state <= STATE_FETCH;
                     end
@@ -615,6 +633,32 @@ module cpu (
 
                         ALU_LD_SP: begin
                             sp <= nn; // Move immediate 16-bit value into Stack Pointer
+                            state <= STATE_FETCH;
+                        end
+
+                        ALU_PUSH: begin
+                            state <= STATE_FETCH;
+                        end
+
+                        ALU_POP: begin
+                            case (ir[5:3])
+                                3'b000: begin
+                                    b <= ret_addr[15:8];
+                                    c <= ret_addr[7:0];
+                                end
+                                3'b010: begin
+                                    d <= ret_addr[15:8];
+                                    e <= ret_addr[7:0];
+                                end
+                                3'b100: begin
+                                    h <= ret_addr[15:8];
+                                    l <= ret_addr[7:0];
+                                end
+                                3'b110: begin
+                                    a <= ret_addr[15:8];
+                                    f <= ret_addr[7:0];
+                                end
+                            endcase
                             state <= STATE_FETCH;
                         end
 
