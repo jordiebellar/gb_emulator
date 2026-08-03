@@ -2,7 +2,7 @@
 // Project      : GameBoy Emulator
 // File         : cpu.v
 // Author       : Jordie Bellar
-// Date         : 2026-06-06
+// Date         : 2026-08-03
 // Description  : Implements the SM83 CPU core. Responsible for fetch,
 //                decode, and execute of all instructions. Manages
 //                internal registers, flags, and memory bus interface.
@@ -13,6 +13,8 @@ module cpu (
     input wire clk,
     input wire rst,
     input wire [7:0] data_in,
+    input wire [7:0] ie,
+    input wire [7:0] if_reg,
     output reg we,
     output reg [15:0] addr,
     output reg [7:0] data_out
@@ -94,6 +96,9 @@ module cpu (
     reg [15:0] ret_addr; // Return address for CALL and RET instructions
     reg second_stack_fetch; // Flag to indicate second fetch for 16-bit immediate values
     reg push_after_imm; // Flag to indicate that we need to push return address after fetching immediate value
+
+    // Interrupt Master Enable
+    reg ime;
 
     // Helper function to get register value based on identifier
     function [7:0] get_reg;

@@ -2,7 +2,7 @@
 // Project      : GameBoy Emulator
 // File         : gb_top.v
 // Author       : Jordie Bellar
-// Date         : 2026-07-03
+// Date         : 2026-08-03
 // Description  : Top-level module for the GameBoy emulator, integrating CPU, memory map, and other components.
 // Revision     : 1.0 - Initial implementation
 // =============================================================================
@@ -15,6 +15,8 @@ module gb_top (
 wire [15:0] bus_addr;
 wire [7:0]  bus_data_wr;
 wire [7:0]  bus_data_rd;
+wire [7:0]  bus_ie;
+wire [7:0]  bus_if;
 wire        bus_we;
 
 memory_map memory_map_inst (
@@ -23,7 +25,9 @@ memory_map memory_map_inst (
     .addr(bus_addr),
     .data_in(bus_data_wr),
     .we(bus_we),
-    .data_out(bus_data_rd)
+    .data_out(bus_data_rd),
+    .ie(bus_ie),
+    .if_reg(bus_if)
 );
 
 cpu cpu_inst (
@@ -31,6 +35,8 @@ cpu cpu_inst (
     .rst(rst),
     .addr(bus_addr),
     .data_in(bus_data_rd),
+    .ie(bus_ie),
+    .if_reg(bus_if),
     .we(bus_we),
     .data_out(bus_data_wr)
 );
