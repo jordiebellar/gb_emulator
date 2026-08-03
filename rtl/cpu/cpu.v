@@ -72,6 +72,7 @@ module cpu (
     localparam ALU_LD_SP  = 5'b10100; // Load into stack pointer
     localparam ALU_PUSH   = 5'b10101; // PUSH register pairs
     localparam ALU_POP    = 5'b10111; // POP register pair from stack
+    localparam ALU_JP_CC  = 5'b11000; // Conditional absolute jumps
 
     // Registers
     reg [15:0] pc;   // Program Counter
@@ -377,13 +378,19 @@ module cpu (
                             3'b100: ret_addr <= {h, l};
                             3'b110: ret_addr <= {a, f};
                         endcase
-                        alu_op <= ALU_PUSH;
+                        alu_op <= ALU_PUSH; // Identify as PUSH instruction
                         state <= STATE_STACK_PUSH;
                     end
 
-                    else if(ir[7:6] == 2'b11 && ir[2:0] == 3'b001 && ir[5:3] != 3'b001) begin
-                        alu_op <= ALU_POP;
+                    else if (ir[7:6] == 2'b11 && ir[2:0] == 3'b001 && ir[5:3] != 3'b001) begin
+                        alu_op <= ALU_POP; // Identify as POP instruction
                         state <= STATE_STACK_POP;
+                    end
+
+                    else if (ir[7:6] == 2'b11 && ir[2:0] == 3'b010) begin
+                        alu_op <= ALU_JP_CC; // Identify as JP conditional instruction
+                        imm16 <= 1'b1; // Set imm16 to indicate that we need to fetch an 16-bit immediate value
+                        state <= STATE_FETCH_IMM;
                     end
 
                     else begin
@@ -660,6 +667,18 @@ module cpu (
                                 end
                             endcase
                             state <= STATE_FETCH;
+                        end
+
+                        ALU_JP_CC: begin
+                            // Handle JP cc, nn instruction
+                            case (ir[5:3]) // Check the condition code
+                                3'b000: if (!f[F_Z]) pc <= nn; // JP NZ, nn
+                                3'b001: if (f[F_Z]) pc <= nn;  // JP Z, nn
+                                3'b010: if (!f[F_C]) pc <= nn; // JP NC, nn
+                                3'b011: if (f[F_C]) pc <= nn;  // JP C, nn
+                                default: ; // No operation for invalid condition codes
+                            endcase
+                            state <= STATE_FETCH; // Return to fetch state after execution
                         end
 
                         default: state <= STATE_FETCH; // For unimplemented ALU operations, return to fetch
