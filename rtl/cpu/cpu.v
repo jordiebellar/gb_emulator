@@ -86,6 +86,7 @@ module cpu (
     reg [7:0]  h, l; // HL Register Pair
     reg [7:0]  ir;   // Instruction Register
     reg [15:0] mem_addr; // Memory Address register
+    reg [15:0] mem_data; // Holds the value being written
 
     // State Machine
     reg [3:0] state;
@@ -167,6 +168,7 @@ module cpu (
             if_clear <= 8'h00;
             if_clear_we <= 1'b0;
             mem_addr <= 16'h0000;
+            mem_data <= 16'h0000;
         end
         else begin           
             // State Machine for Fetch, Decode, Execute
@@ -376,7 +378,7 @@ module cpu (
                     end
 
                     else if (ir[7:6] == 2'b11 && ir [2:0] == 3'b101 && ir[5:3] != 3'b001) begin
-                        case (ir[5:3])
+                        case (dst)
                             3'b000: ret_addr <= {b, c};
                             3'b010: ret_addr <= {d, e};
                             3'b100: ret_addr <= {h, l};
@@ -763,6 +765,44 @@ module cpu (
                         state <= STATE_FETCH;
                     end
                 end
+
+                STATE_MEM_READ: begin
+                    if (!fetch_ready) begin
+                        addr <= mem_addr;
+                        we <= 1'b0;
+                        fetch_ready <= 1'b1;
+                    end
+                    else if (fetch_ready) begin
+                        case (dst)
+                            REG_B:  b <= data_in;
+                            REG_C:  c <= data_in;
+                            REG_D:  d <= data_in;
+                            REG_E:  e <= data_in;
+                            REG_H:  h <= data_in;
+                            REG_L:  l <= data_in;
+                            REG_A:  a <= data_in;
+                            default: ; // No operation for invalid destination
+                        endcase
+                        fetch_ready <= 1'b0;
+                        state <= STATE_FETCH;
+                    end
+                end
+
+                STATE_MEM_WRITE: begin
+                    if(!fetch_ready) begin
+                        addr <= mem_addr;
+                        data_out <= mem_data;
+                        we <= 1'b1;
+                        fetch_ready <= 1'b1;
+                    end
+                    else if(fetch_ready) begin
+                        we <= 1'b0;
+                        fetch_ready <= 1'b0;
+                        state <= STATE_FETCH;
+                    end
+
+                end
+
 
                 default: begin
                     state <= STATE_FETCH;
