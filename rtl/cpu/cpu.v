@@ -69,6 +69,7 @@ module cpu (
     localparam ALU_DI     = 5'b10001; // Disable Interrupts
     localparam ALU_EI     = 5'b10010; // Enable Interrupts
     localparam ALU_RETI   = 5'b10011; // RETI
+    localparam ALU_LD_SP  = 5'b10100; // Load into stack pointer
 
     // Registers
     reg [15:0] pc;   // Program Counter
@@ -310,7 +311,7 @@ module cpu (
 
                     else if (ir[7:6] == 2'b11 && ir[2:0] == 3'b011) begin
                         alu_op <= ALU_JP_IMM; // Identify as JP instruction with immediate value
-                        imm16 <= 1'b1; // Set imm16 to indicate that we need to
+                        imm16 <= 1'b1; // Set imm16 to indicate that we need to fetch a 16-bit immediate value
                         state <= STATE_FETCH_IMM; // Move to fetch immediate state
                     end
 
@@ -359,6 +360,12 @@ module cpu (
 
                     else if (ir == 8'h00) begin
                         state <= STATE_FETCH; // Identify as NOP instruction
+                    end
+
+                    else if (ir == 8'h31) begin
+                        alu_op <= ALU_LD_SP; // Identify as JR conditional instruction
+                        imm16 <= 1'b1; // Set imm16 to indicate that we need to fetch an 16-bit immediate value
+                        state <= STATE_FETCH_IMM; // Move to fetch immediate state
                     end
 
                     else begin
@@ -603,6 +610,11 @@ module cpu (
                         ALU_RETI: begin
                             pc <= ret_addr;
                             ime <= 1'b1;
+                            state <= STATE_FETCH;
+                        end
+
+                        ALU_LD_SP: begin
+                            sp <= nn; // Move immediate 16-bit value into Stack Pointer
                             state <= STATE_FETCH;
                         end
 
