@@ -13,6 +13,8 @@ module memory_map (
     input wire  [15:0] addr,
     input wire  [7:0] data_in,
     input wire  we,
+    input wire [7:0] if_clear,
+    input wire if_clear_we,
     output reg  [7:0] data_out,
     output reg [7:0] ie,       // 0xFFFF
     output reg [7:0] if_reg    // 0xFF0F
@@ -31,6 +33,9 @@ always @(posedge clk or posedge rst) begin
         if_reg <= 8'h00;
     end
     else begin
+
+        if (if_clear_we) if_reg <= if_reg & ~if_clear;
+
         if (we) begin
             // Write operation
             // Write to IE

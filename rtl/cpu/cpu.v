@@ -17,7 +17,9 @@ module cpu (
     input wire [7:0] if_reg,
     output reg we,
     output reg [15:0] addr,
-    output reg [7:0] data_out
+    output reg [7:0] data_out,
+    output reg [7:0] if_clear,   // Which IF bit to clear
+    output reg       if_clear_we // pulse high for one cycle to clear
 );
 
     // Local Parameters
@@ -62,6 +64,7 @@ module cpu (
     localparam ALU_JR_CC  = 5'b01101; // Jump Relative Conditional
     localparam ALU_CALL   = 5'b01110; // Push to Stack
     localparam ALU_RET    = 5'b01111; // Pop from Stack
+    localparam ALU_INT    = 5'b10000; // INT
 
     // Registers
     reg [15:0] pc;   // Program Counter
@@ -97,8 +100,10 @@ module cpu (
     reg second_stack_fetch; // Flag to indicate second fetch for 16-bit immediate values
     reg push_after_imm; // Flag to indicate that we need to push return address after fetching immediate value
 
-    // Interrupt Master Enable
-    reg ime;
+    // Interrupt Registers
+    reg ime; // Interrupt Master Enable
+    reg [15:0] iv_addr; // Interrupt vector address
+    reg ime_pending; // Delayed IME enable for EI instruction
 
     // Helper function to get register value based on identifier
     function [7:0] get_reg;
@@ -143,26 +148,63 @@ module cpu (
             ret_addr <= 16'h0000;
             second_stack_fetch <= 1'b0;
             push_after_imm <= 1'b0;
+            iv_addr <= 16'h0000;
+            ime_pending <= 1'b0;
             we <= 1'b0;
             addr <= 16'h0000;
             data_out <= 8'h00;
+            if_clear <= 8'h00;
+            if_clear_we <= 1'b0;
         end
-        else begin
-            
+        else begin           
             // State Machine for Fetch, Decode, Execute
             case (state)
                 // Fetch the next instruction
                 STATE_FETCH: begin
-                    if (!fetch_ready) begin
-                        addr  <= pc;           // Set address to PC for fetching instruction
-                        we    <= 1'b0;         // Read operation
-                        fetch_ready <= 1'b1;   // Indicate fetch is ready
+                    if (ime && (ie & if_reg) != 8'h00) begin
+                        ime <= 0;
+                        ret_addr <= pc;
+                        if (ie & if_reg & 8'h01) begin       // VBlank
+                            iv_addr <= 16'h0040;             // Vector Address
+                            if_clear <= 8'h01;               // Bit to Clear
+                            if_clear_we <= 1'b1;             // Clear Enable    
+                        end
+                        else if (ie & if_reg & 8'h02) begin  // LCD STAT
+                            iv_addr <= 16'h0048;             // Vector Address
+                            if_clear <= 8'h02;               // Bit to Clear
+                            if_clear_we <= 1'b1;             // Clear Enable
+                        end
+                        else if (ie & if_reg & 8'h04) begin  // Timer
+                            iv_addr <= 16'h0050;             // Vector Address
+                            if_clear <= 8'h04;               // Bit to Clear
+                            if_clear_we <= 1'b1;             // Clear Enable
+                        end    
+                        else if (ie & if_reg & 8'h08) begin  // Serial
+                            iv_addr <= 16'h0058;             // Vector Address
+                            if_clear <= 8'h08;               // Bit to Clear
+                            if_clear_we <= 1'b1;             // Clear Enable
+                        end
+                        else if (ie & if_reg & 8'h10) begin  // Joypad
+                            iv_addr <= 16'h0060;             // Vector Address
+                            if_clear <= 8'h10;               // Bit to Clear
+                            if_clear_we <= 1'b1;             // Clear Enable
+                        end
+                        alu_op <= ALU_INT;
+                        state <= STATE_STACK_PUSH;
                     end
                     else begin
-                        ir <= data_in;         // Load fetched instruction into IR
-                        pc <= pc + 1;          // Increment PC to point to next instruction
-                        fetch_ready <= 1'b0;   // Reset fetch ready for next cycle
-                        state <= STATE_DECODE; // Move to decode state
+                        if_clear_we <= 1'b0; // Disable Clear
+                        if (!fetch_ready) begin
+                            addr  <= pc;           // Set address to PC for fetching instruction
+                            we    <= 1'b0;         // Read operation
+                            fetch_ready <= 1'b1;   // Indicate fetch is ready
+                        end
+                        else begin
+                            ir <= data_in;         // Load fetched instruction into IR
+                            pc <= pc + 1;          // Increment PC to point to next instruction
+                            fetch_ready <= 1'b0;   // Reset fetch ready for next cycle
+                            state <= STATE_DECODE; // Move to decode state
+                        end
                     end
                 end
 
@@ -513,6 +555,12 @@ module cpu (
                             // Handle RET instruction
                             pc <= ret_addr; // Set PC to the return address popped from the stack
                             state <= STATE_FETCH; // Return to fetch state after execution
+                        end
+
+                        ALU_INT: begin
+                            // Handle Interrupts
+                            pc <= iv_addr;
+                            state <= STATE_FETCH;
                         end
 
                         default: state <= STATE_FETCH; // For unimplemented ALU operations, return to fetch
