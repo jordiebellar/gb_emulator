@@ -354,7 +354,11 @@ module cpu (
                     end
 
                     else if (ir == 8'h76) begin
-                        state <= STATE_HALT;
+                        state <= STATE_HALT; // Identify as HALT instruction
+                    end
+
+                    else if (ir == 8'h00) begin
+                        state <= STATE_FETCH; // Identify as NOP instruction
                     end
 
                     else begin
