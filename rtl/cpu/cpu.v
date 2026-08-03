@@ -37,6 +37,7 @@ module cpu (
     localparam STATE_FETCH_IMM = 3'd3; // Fetch Immediate Data
     localparam STATE_STACK_PUSH = 3'd4; // Push to Stack
     localparam STATE_STACK_POP  = 3'd5; // Pop from Stack
+    localparam STATE_HALT = 3'd6; // Halts until interrupt
 
     // Register Identifiers
     localparam REG_B  = 3'd0;
@@ -350,6 +351,10 @@ module cpu (
                     else if (ir == 8'hD9) begin
                         alu_op <= ALU_RETI; // Identify as RETI instruction
                         state <= STATE_STACK_POP;
+                    end
+
+                    else if (ir == 8'h76) begin
+                        state <= STATE_HALT;
                     end
 
                     else begin
@@ -667,6 +672,12 @@ module cpu (
                             second_stack_fetch <= 1'b0; // Reset for next pop
                             state <= STATE_EXECUTE;
                         end
+                    end
+                end
+
+                STATE_HALT: begin
+                    if((ie & if_reg) != 8'h00) begin
+                        state <= STATE_FETCH;
                     end
                 end
 
