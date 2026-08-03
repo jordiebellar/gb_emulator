@@ -67,6 +67,7 @@ module cpu (
     localparam ALU_INT    = 5'b10000; // INT
     localparam ALU_DI     = 5'b10001; // Disable Interrupts
     localparam ALU_EI     = 5'b10010; // Enable Interrupts
+    localparam ALU_RETI   = 5'b10011; // RETI
 
     // Registers
     reg [15:0] pc;   // Program Counter
@@ -346,6 +347,11 @@ module cpu (
                         state <= STATE_EXECUTE;
                     end
 
+                    else if (ir == 8'hD9) begin
+                        alu_op <= ALU_RETI; // Identify as RETI instruction
+                        state <= STATE_STACK_POP;
+                    end
+
                     else begin
                         state <= STATE_FETCH;
                     end
@@ -582,6 +588,12 @@ module cpu (
 
                         ALU_EI: begin
                             ime_pending <= 1'b1;
+                            state <= STATE_FETCH;
+                        end
+
+                        ALU_RETI: begin
+                            pc <= ret_addr;
+                            ime <= 1'b1;
                             state <= STATE_FETCH;
                         end
 
