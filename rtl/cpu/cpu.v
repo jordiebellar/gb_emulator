@@ -31,13 +31,15 @@ module cpu (
     localparam F_C = 4; // Carry Flag
 
     // CPU States
-    localparam STATE_FETCH   = 3'd0;
-    localparam STATE_DECODE  = 3'd1;
-    localparam STATE_EXECUTE = 3'd2;
-    localparam STATE_FETCH_IMM = 3'd3; // Fetch Immediate Data
-    localparam STATE_STACK_PUSH = 3'd4; // Push to Stack
-    localparam STATE_STACK_POP  = 3'd5; // Pop from Stack
-    localparam STATE_HALT = 3'd6; // Halts until interrupt
+    localparam STATE_FETCH   = 4'd0;
+    localparam STATE_DECODE  = 4'd1;
+    localparam STATE_EXECUTE = 4'd2;
+    localparam STATE_FETCH_IMM = 4'd3; // Fetch Immediate Data
+    localparam STATE_STACK_PUSH = 4'd4; // Push to Stack
+    localparam STATE_STACK_POP  = 4'd5; // Pop from Stack
+    localparam STATE_HALT = 4'd6; // Halts until interrupt
+    localparam STATE_MEM_READ = 4'd7; // Puts address on bus, waits, them reads data_in
+    localparam STATE_MEM_WRITE = 4'd8; // Writes to memory address
 
     // Register Identifiers
     localparam REG_B  = 3'd0;
@@ -83,9 +85,10 @@ module cpu (
     reg [7:0]  d, e; // DE Register Pair
     reg [7:0]  h, l; // HL Register Pair
     reg [7:0]  ir;   // Instruction Register
+    reg [15:0] mem_addr; // Memory Address register
 
     // State Machine
-    reg [2:0] state;
+    reg [3:0] state;
 
     // Flags
     reg fetch_ready;
@@ -163,6 +166,7 @@ module cpu (
             data_out <= 8'h00;
             if_clear <= 8'h00;
             if_clear_we <= 1'b0;
+            mem_addr <= 16'h0000;
         end
         else begin           
             // State Machine for Fetch, Decode, Execute
