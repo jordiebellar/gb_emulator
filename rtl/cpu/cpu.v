@@ -65,6 +65,8 @@ module cpu (
     localparam ALU_CALL   = 5'b01110; // Push to Stack
     localparam ALU_RET    = 5'b01111; // Pop from Stack
     localparam ALU_INT    = 5'b10000; // INT
+    localparam ALU_DI     = 5'b10001; // Disable Interrupts
+    localparam ALU_EI     = 5'b10010; // Enable Interrupts
 
     // Registers
     reg [15:0] pc;   // Program Counter
@@ -334,6 +336,16 @@ module cpu (
                         state <= STATE_STACK_POP; // Move to stack pop state to retrieve return address
                     end
 
+                    else if (ir == 8'hF3) begin
+                        alu_op <= ALU_DI; // Identify as DI instruction
+                        state <= STATE_EXECUTE;
+                    end
+
+                    else if (ir == 8'hFB) begin
+                        alu_op <= ALU_EI; // Identify as EI instruction
+                        state <= STATE_EXECUTE;
+                    end
+
                     else begin
                         state <= STATE_FETCH;
                     end
@@ -563,9 +575,25 @@ module cpu (
                             state <= STATE_FETCH;
                         end
 
+                        ALU_DI: begin
+                            ime <= 1'b0;
+                            state <= STATE_FETCH;
+                        end
+
+                        ALU_EI: begin
+                            ime_pending <= 1'b1;
+                            state <= STATE_FETCH;
+                        end
+
                         default: state <= STATE_FETCH; // For unimplemented ALU operations, return to fetch
-                        
+                
                     endcase
+
+                    if(ime_pending) begin
+                        ime <= 1'b1;
+                        ime_pending <= 1'b0;
+                    end  
+
                 end
                 
                 STATE_STACK_PUSH: begin
@@ -633,8 +661,7 @@ module cpu (
                 default: begin
                     state <= STATE_FETCH;
                 end
-                
-    
+
             endcase
         end
     end
