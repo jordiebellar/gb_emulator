@@ -267,8 +267,22 @@ module cpu (
                     src <= ir[2:0]; // Source register (bits 2-0)
 
                     if (ir[7:6] == 2'b01) begin
-                        alu_op <= ALU_LD;       // Identify as LD instruction
-                        state <= STATE_EXECUTE; // Move to execute state
+                        if (src == 3'b110) begin
+                            // LD r, (HL)
+                            mem_addr <= {h, l}; // Set memory address to HL for read
+                            state <= STATE_MEM_READ; // Move to memory read state
+                        end
+                        else if (dst == 3'b110) begin
+                            // LD (HL), r
+                            mem_addr <= {h, l}; // Set memory address to HL for write
+                            mem_data <= get_reg(src); // Set data to be written from source register
+                            state <= STATE_MEM_WRITE; // Move to memory write state
+                        end
+                        else begin
+                            // LD r, r'
+                            alu_op <= ALU_LD; // Identify as LD instruction
+                            state <= STATE_EXECUTE; // Move to execute state
+                        end
                     end
 
                     else if (ir[7:6] == 2'b00 && ir[2:0] == 3'b110) begin
