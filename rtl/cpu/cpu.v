@@ -413,6 +413,26 @@ module cpu (
                         state <= STATE_FETCH_IMM;
                     end
 
+                    else if (ir[7:6] == 2'b00 && ir[5:3] == 3'b010) begin
+                        case (ir[5:4])
+                            2'b00: mem_addr <= {b, c}; // Set memory address to BC for read/write
+                            2'b01: mem_addr <= {d, e}; // Set memory address to DE for read/write
+                            2'b10: // HL increment
+                            2'b11: // HL decrement
+                        endcase
+
+                        if (ir[3]) begin
+                            // Read into A
+                            dst <= REG_A; // Set destination to A
+                            state <= STATE_MEM_READ; // Move to memory read state
+                        end
+                        else begin
+                            // Write from A
+                            mem_data <= a; // Set data to be written from A
+                            state <= STATE_MEM_WRITE; // Move to memory write state
+                        end
+                    end
+
                     else begin
                         state <= STATE_FETCH;
                     end
