@@ -38,31 +38,29 @@ module tb_cpu;
     reg [7:0] ram [0:65535]; // Full 64KB address space
 
     initial begin
-        ram[0] = 8'h31;    // LD SP, nn
-        ram[1] = 8'hFE;    // SP = 0xDFFE (in WRAM)
-        ram[2] = 8'hDF;
-        ram[3] = 8'h3E;    // LD A, n
-        ram[4] = 8'h42;    // A = 0x42
-        ram[5] = 8'hEA;    // LD (nn), A  - store A to address
-        ram[6] = 8'h00;    // low byte of address
-        ram[7] = 8'hC0;    // high byte - store to 0xC000 (WRAM)
-        ram[8] = 8'hFA;    // LD A, (nn) - load from same address
-        ram[9] = 8'h00;    // low byte
-        ram[10] = 8'hC0;   // high byte
-        ram[11] = 8'h3E;    // LD A, n
-        ram[12] = 8'h99;    // A = 0x99
-        ram[13] = 8'hE0;    // LDH (n), A
-        ram[14] = 8'h80;    // n = 0x80 -> writes A to 0xFF80
-        ram[15] = 8'h3E;    // LD A, n
-        ram[16] = 8'h00;    // A = 0x00 (clear it so the next load is a real test, not a leftover)
-        ram[17] = 8'hF0;    // LDH A, (n)
-        ram[18] = 8'h80;    // n = 0x80 -> reads 0xFF80 back into A
-        ram[19] = 8'hC3;    // JP to itself (new halt point)
-        ram[20] = 8'h16;
-        ram[21] = 8'h00;
-        ram[22] = 8'hC3;   // JP to itself
-        ram[23] = 8'h0B;
-        ram[24] = 8'h00;
+        ram[0]  = 8'h26;  // LD H, n
+        ram[1]  = 8'hC0;  // H = 0xC0
+        ram[2]  = 8'h2E;  // LD L, n
+        ram[3]  = 8'h20;  // L = 0x20  -> HL = 0xC020
+
+        ram[4]  = 8'h3E;  // LD A, n
+        ram[5]  = 8'h11;  // A = 0x11
+        ram[6]  = 8'h22;  // LD (HLI), A -> ram[C020]=0x11, HL becomes C021
+
+        ram[7]  = 8'h3E;  // LD A, n
+        ram[8]  = 8'h22;  // A = 0x22
+        ram[9]  = 8'h22;  // LD (HLI), A -> ram[C021]=0x22, HL becomes C022
+
+        ram[10] = 8'h3E;  // LD A, n
+        ram[11] = 8'h00;  // clear A so the reads below are a real test
+
+        ram[12] = 8'h3A;  // LD A, (HLD) -> reads ram[C022] (uninitialized), HL becomes C021
+        ram[13] = 8'h3A;  // LD A, (HLD) -> reads ram[C021]=0x22, A should be 0x22, HL becomes C020
+        ram[14] = 8'h3A;  // LD A, (HLD) -> reads ram[C020]=0x11, A should be 0x11, HL becomes C01F
+
+        ram[15] = 8'hC3;  // JP to itself
+        ram[16] = 8'h0F;
+        ram[17] = 8'h00;
     end
 
     initial begin
@@ -76,9 +74,7 @@ module tb_cpu;
         #20 rst = 0; // Release reset after 20ns
         // Additional test cases can be added here to cover more instructions and scenarios
         #800;
-        $display("ram[C000] = %h", ram[16'hC000]);
         #1500;
-        $display("ram[FF80] = %h", ram[16'hFF80]);
         $finish; // End simulation after 100ns
     end
 

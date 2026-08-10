@@ -475,6 +475,7 @@ module cpu (
                     end
 
                     else if (ir[7:6] == 2'b11 && ir [2:0] == 3'b101 && ir[5:3] != 3'b001) begin
+                        dst <= ir[5:3]; // Set destination register pair for PUSH instruction
                         case (dst)
                             3'b000: ret_addr <= {b, c};
                             3'b010: ret_addr <= {d, e};
@@ -496,12 +497,22 @@ module cpu (
                         state <= STATE_FETCH_IMM;
                     end
 
-                    else if (ir[7:6] == 2'b00 && ir[5:3] == 3'b010) begin
+                    else if (ir[7:6] == 2'b00 && ir[2:0] == 3'b010) begin
+                        // LD (BC), A or LD (DE), A or LD (HL+), A or LD (HL-), A
+                        src <= REG_A; // Set source to A
                         case (ir[5:4])
                             2'b00: mem_addr <= {b, c}; // Set memory address to BC for read/write
                             2'b01: mem_addr <= {d, e}; // Set memory address to DE for read/write
-                            2'b10: ;// HL increment
-                            2'b11: ;// HL decrement
+                            2'b10: // HL increment
+                            begin 
+                                {h, l} <= {h, l} + 1;
+                                mem_addr <= {h, l}; // Set memory address to HL for read/write
+                            end 
+                            2'b11: // HL decrement
+                            begin 
+                                {h, l} <= {h, l} - 1; 
+                                mem_addr <= {h, l}; // Set memory address to HL for read/write
+                            end 
                         endcase
 
                         if (ir[3]) begin
@@ -523,7 +534,7 @@ module cpu (
                         mem_read_after_imm <= 1'b1; // Set flag to read from memory after fetching immediate value
                         state <= STATE_FETCH_IMM; // Move to fetch immediate state
                     end
-                    
+
                     else if (ir == 8'hE0) begin
                         // LDH (n), A
                         src <= REG_A; // Set source to A
