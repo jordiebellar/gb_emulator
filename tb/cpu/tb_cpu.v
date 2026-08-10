@@ -49,9 +49,20 @@ module tb_cpu;
         ram[8] = 8'hFA;    // LD A, (nn) - load from same address
         ram[9] = 8'h00;    // low byte
         ram[10] = 8'hC0;   // high byte
-        ram[11] = 8'hC3;   // JP to itself
-        ram[12] = 8'h0B;
-        ram[13] = 8'h00;
+        ram[11] = 8'h3E;    // LD A, n
+        ram[12] = 8'h99;    // A = 0x99
+        ram[13] = 8'hE0;    // LDH (n), A
+        ram[14] = 8'h80;    // n = 0x80 -> writes A to 0xFF80
+        ram[15] = 8'h3E;    // LD A, n
+        ram[16] = 8'h00;    // A = 0x00 (clear it so the next load is a real test, not a leftover)
+        ram[17] = 8'hF0;    // LDH A, (n)
+        ram[18] = 8'h80;    // n = 0x80 -> reads 0xFF80 back into A
+        ram[19] = 8'hC3;    // JP to itself (new halt point)
+        ram[20] = 8'h16;
+        ram[21] = 8'h00;
+        ram[22] = 8'hC3;   // JP to itself
+        ram[23] = 8'h0B;
+        ram[24] = 8'h00;
     end
 
     initial begin
@@ -67,6 +78,7 @@ module tb_cpu;
         #800;
         $display("ram[C000] = %h", ram[16'hC000]);
         #1500;
+        $display("ram[FF80] = %h", ram[16'hFF80]);
         $finish; // End simulation after 100ns
     end
 

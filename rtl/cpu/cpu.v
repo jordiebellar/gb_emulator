@@ -239,7 +239,20 @@ module cpu (
                             n <= data_in;        // Load 8-bit immediate value into 'n'
                             pc <= pc + 1;        // Increment PC after fetching immediate
                             fetch_ready <= 1'b0; // Reset fetch ready for next cycle
-                            state <= STATE_EXECUTE; // Move to execute state to execute instruction with immediate value
+                            if (mem_read_after_imm) begin
+                                mem_read_after_imm <= 1'b0; // Reset mem_read_after_imm flag
+                                mem_addr <= 16'hFF00 + data_in; // Set memory address to the fetched 8-bit immediate value for read
+                                state <= STATE_MEM_READ; // Move to memory read state
+                            end
+                            else if (mem_write_after_imm) begin
+                                mem_write_after_imm <= 1'b0; // Reset mem_write_after_imm flag
+                                mem_data <= get_reg(src); // Set data to be written from source register
+                                mem_addr <= 16'hFF00 + data_in; // Set memory address to the fetched 8-bit immediate value for write
+                                state <= STATE_MEM_WRITE; // Move to memory write state
+                            end
+                            else begin
+                                state <= STATE_EXECUTE; // Move to execute state to execute instruction with immediate value
+                            end
                         end
                         else begin
                             nn[7:0] <= data_in;    // Load lower 8 bits of 16-bit immediate value into 'nn'
@@ -501,6 +514,22 @@ module cpu (
                             mem_data <= a; // Set data to be written from A
                             state <= STATE_MEM_WRITE; // Move to memory write state
                         end
+                    end
+
+                    else if (ir == 8'hF0) begin
+                        // LDH A, (n)
+                        dst <= REG_A; // Set destination to A
+                        imm16 <= 1'b0; // Set imm16 to indicate that we need to fetch an 8-bit immediate value
+                        mem_read_after_imm <= 1'b1; // Set flag to read from memory after fetching immediate value
+                        state <= STATE_FETCH_IMM; // Move to fetch immediate state
+                    end
+                    
+                    else if (ir == 8'hE0) begin
+                        // LDH (n), A
+                        src <= REG_A; // Set source to A
+                        imm16 <= 1'b0; // Set imm16 to indicate that we need to fetch an 8-bit immediate value
+                        mem_write_after_imm <= 1'b1; // Set flag to write to memory after fetching immediate value
+                        state <= STATE_FETCH_IMM; // Move to fetch immediate state
                     end
 
                     else begin
