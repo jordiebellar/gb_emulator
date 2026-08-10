@@ -95,6 +95,9 @@ module cpu (
     reg fetch_ready;
     reg second_fetch;
     reg imm16;
+    // For Memory Read/Write
+    reg mem_read_after_imm; // Flag to indicate that we need to read from memory after fetching immediate value
+    reg mem_write_after_imm; // Flag to indicate that we need to write to memory after fetching immediate value
 
     // Instruction Decoding
     reg [2:0] src;
@@ -152,6 +155,8 @@ module cpu (
             fetch_ready <= 1'b0;
             second_fetch <= 1'b0;
             imm16 <= 1'b0;
+            mem_read_after_imm <= 1'b0;
+            mem_write_after_imm <= 1'b0;
             src <= 3'b000;
             dst <= 3'b000;
             alu_op <= 5'b00000;
@@ -255,6 +260,17 @@ module cpu (
                             push_after_imm <= 1'b0; // Reset push_after_imm flag
                             state <= STATE_STACK_PUSH; // Move to stack push state to push return address onto stack
                         end
+                        else if (mem_read_after_imm) begin
+                            mem_addr <= {data_in, nn[7:0]}; // Set memory address to the fetched 16-bit immediate value for read
+                            mem_read_after_imm <= 1'b0; // Reset mem_read_after_imm flag
+                            state <= STATE_MEM_READ; // Move to memory read state
+                        end
+                        else if (mem_write_after_imm) begin
+                            mem_addr <= {data_in, nn[7:0]}; // Set memory address to the fetched 16-bit immediate value for write
+                            mem_data <= get_reg(src); // Set data to be written from source register
+                            mem_write_after_imm <= 1'b0; // Reset mem_write_after_imm flag
+                            state <= STATE_MEM_WRITE; // Move to memory write state
+                        end
                         else begin
                             state <= STATE_EXECUTE; // Move to execute state to execute instruction with immediate value
                         end
@@ -263,19 +279,19 @@ module cpu (
                 
                 // Decode the fetched instruction
                 STATE_DECODE: begin
-                    dst <= ir[5:3]; // Destination register (bits 5-3)
-                    src <= ir[2:0]; // Source register (bits 2-0)
 
                     if (ir[7:6] == 2'b01) begin
-                        if (src == 3'b110) begin
+                        dst <= ir[5:3]; // Set destination register
+                        src <= ir[2:0]; // Set source register
+                        if (ir[2:0] == 3'b110) begin
                             // LD r, (HL)
                             mem_addr <= {h, l}; // Set memory address to HL for read
                             state <= STATE_MEM_READ; // Move to memory read state
                         end
-                        else if (dst == 3'b110) begin
+                        else if (ir[5:3] == 3'b110) begin
                             // LD (HL), r
                             mem_addr <= {h, l}; // Set memory address to HL for write
-                            mem_data <= get_reg(src); // Set data to be written from source register
+                            mem_data <= get_reg(ir[2:0]); // Set data to be written from source register
                             state <= STATE_MEM_WRITE; // Move to memory write state
                         end
                         else begin
@@ -286,71 +302,102 @@ module cpu (
                     end
 
                     else if (ir[7:6] == 2'b00 && ir[2:0] == 3'b110) begin
+                        // LD r, n
                         // This is an instruction that requires an immediate value
+                        dst <= ir[5:3]; // Set destination register
+                        src <= ir[2:0]; // Set source register
                         alu_op <= ALU_LD_IMM; // Identify as LD IMMEDIATE instruction
                         imm16 <= 1'b0; // Set imm16 to indicate that we need to fetch an 8-bit immediate value
                         state <= STATE_FETCH_IMM; // Move to fetch immediate state
                     end
 
                     else if (ir[7:6] == 2'b00 && ir[2:0] == 3'b100) begin
+                        // INC r
+                        dst <= ir[5:3]; // Set destination register
+                        src <= ir[2:0]; // Set source register
                         alu_op <= ALU_INC; // Identify as INC instruction
                         state <= STATE_EXECUTE; // Move to execute state
                     end
 
                     else if (ir[7:6] == 2'b00 && ir[2:0] == 3'b101) begin
+                        // DEC r
+                        dst <= ir[5:3]; // Set destination register
+                        src <= ir[2:0]; // Set source register
                         alu_op <= ALU_DEC; // Identify as DEC instruction
                         state <= STATE_EXECUTE; // Move to execute state
                     end
 
                     else if (ir[7:6] == 2'b10 && ir[5:3] == 3'b000) begin
+                        // ADD r
+                        src <= ir[2:0]; // Set source register
+                        dst <= 3'b111; // Set destination register to A (Accumulator)
                         alu_op <= ALU_ADD; // Identify as ADD instruction
                         state <= STATE_EXECUTE; // Move to execute state
                     end
 
                     else if (ir[7:6] == 2'b10 && ir[5:3] == 3'b010) begin
+                        // SUB r
+                        src <= ir[2:0]; // Set source register
+                        dst <= 3'b111; // Set destination register to A (Accumulator)
                         alu_op <= ALU_SUB; // Identify as SUB instruction
                         state <= STATE_EXECUTE; // Move to execute state
                     end
 
                     else if (ir[7:6] == 2'b10 && ir[5:3] == 3'b100) begin
+                        // AND r
+                        src <= ir[2:0]; // Set source register
+                        dst <= 3'b111; // Set destination register to A (Accumulator)
                         alu_op <= ALU_AND; // Identify as AND instruction
                         state <= STATE_EXECUTE; // Move to execute state
                     end
 
                     else if (ir[7:6] == 2'b10 && ir[5:3] == 3'b101) begin
+                        // XOR r
+                        src <= ir[2:0]; // Set source register
+                        dst <= 3'b111; // Set destination register to A (Accumulator)
                         alu_op <= ALU_XOR; // Identify as XOR instruction
                         state <= STATE_EXECUTE; // Move to execute state
                     end
 
                     else if (ir[7:6] == 2'b10 && ir[5:3] == 3'b110) begin
+                        // OR r
+                        src <= ir[2:0]; // Set source register
+                        dst <= 3'b111; // Set destination register to A (Accumulator)
                         alu_op <= ALU_OR; // Identify as OR instruction
                         state <= STATE_EXECUTE; // Move to execute state
                     end
 
                     else if (ir[7:6] == 2'b10 && ir[5:3] == 3'b111) begin
+                        // CP r
+                        src <= ir[2:0]; // Set source register
+                        dst <= 3'b111; // Set destination register to A (Accumulator)
                         alu_op <= ALU_CP; // Identify as CP instruction
                         state <= STATE_EXECUTE; // Move to execute state
                     end
 
                     else if (ir[7:6] == 2'b11 && ir[2:0] == 3'b011) begin
+                        // JP nn
                         alu_op <= ALU_JP_IMM; // Identify as JP instruction with immediate value
                         imm16 <= 1'b1; // Set imm16 to indicate that we need to fetch a 16-bit immediate value
                         state <= STATE_FETCH_IMM; // Move to fetch immediate state
                     end
 
                     else if (ir[7:6] == 2'b00 && ir[5:3] == 3'b011 && ir[2:0] == 3'b000) begin
+                        // JR n
                         alu_op <= ALU_JR; // Identify as JR instruction
                         imm16 <= 1'b0; // Set imm16 to indicate that we need to fetch an 8-bit immediate value
                         state <= STATE_FETCH_IMM; // Move to fetch immediate state
                     end
 
                     else if (ir[7:6] == 2'b00 && ir[5:3] >= 3'b100 && ir[2:0] == 3'b000) begin
+                        // JR cc, n
                         alu_op <= ALU_JR_CC; // Identify as JR conditional instruction
                         imm16 <= 1'b0; // Set imm16 to indicate that we need to fetch an 8-bit immediate value
                         state <= STATE_FETCH_IMM; // Move to fetch immediate state
                     end
 
                     else if (ir[7:6] == 2'b11 && ir[5:3] == 3'b001 && ir[2:0] == 3'b101) begin
+                        // CALL nn
                         alu_op <= ALU_CALL; // Identify as CALL instruction
                         imm16 <= 1'b1; // Set imm16 to indicate that we need to fetch a 16-bit immediate value
                         push_after_imm <= 1'b1; // Set flag to push return address after fetching immediate value
@@ -358,36 +405,59 @@ module cpu (
                     end
 
                     else if (ir[7:6] == 2'b11 && ir[5:3] == 3'b001 && ir[2:0] == 3'b001) begin
+                        // RET
                         alu_op <= ALU_RET; // Identify as RET instruction
                         state <= STATE_STACK_POP; // Move to stack pop state to retrieve return address
                     end
 
                     else if (ir == 8'hF3) begin
+                        // DI
                         alu_op <= ALU_DI; // Identify as DI instruction
                         state <= STATE_EXECUTE;
                     end
 
                     else if (ir == 8'hFB) begin
+                        // EI
                         alu_op <= ALU_EI; // Identify as EI instruction
                         state <= STATE_EXECUTE;
                     end
 
                     else if (ir == 8'hD9) begin
+                        // RETI
                         alu_op <= ALU_RETI; // Identify as RETI instruction
                         state <= STATE_STACK_POP;
                     end
 
                     else if (ir == 8'h76) begin
+                        // HALT
                         state <= STATE_HALT; // Identify as HALT instruction
                     end
 
                     else if (ir == 8'h00) begin
+                        // NOP
                         state <= STATE_FETCH; // Identify as NOP instruction
                     end
 
                     else if (ir == 8'h31) begin
-                        alu_op <= ALU_LD_SP; // Identify as JR conditional instruction
+                        // LD SP, nn
+                        alu_op <= ALU_LD_SP; // Identify as LD SP, nn instruction
                         imm16 <= 1'b1; // Set imm16 to indicate that we need to fetch an 16-bit immediate value
+                        state <= STATE_FETCH_IMM; // Move to fetch immediate state
+                    end
+
+                    else if (ir == 8'hFA) begin
+                        // LD A, (nn)
+                        dst <= REG_A;
+                        imm16 <= 1'b1; // Set imm16 to indicate that we need to fetch a 16-bit immediate value
+                        mem_read_after_imm <= 1'b1; // Set flag to read from memory after fetching immediate value
+                        state <= STATE_FETCH_IMM; // Move to fetch immediate state
+                    end
+
+                    else if (ir == 8'hEA) begin
+                        // LD (nn), A
+                        src <= REG_A;
+                        imm16 <= 1'b1; // Set imm16 to indicate that we need to fetch a 16-bit immediate value
+                        mem_write_after_imm <= 1'b1; // Set flag to write to memory after fetching immediate value
                         state <= STATE_FETCH_IMM; // Move to fetch immediate state
                     end
 
@@ -417,8 +487,8 @@ module cpu (
                         case (ir[5:4])
                             2'b00: mem_addr <= {b, c}; // Set memory address to BC for read/write
                             2'b01: mem_addr <= {d, e}; // Set memory address to DE for read/write
-                            2'b10: // HL increment
-                            2'b11: // HL decrement
+                            2'b10: ;// HL increment
+                            2'b11: ;// HL decrement
                         endcase
 
                         if (ir[3]) begin

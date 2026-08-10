@@ -17,6 +17,10 @@ module tb_cpu;
     wire we;
     wire [15:0] addr;
     wire [7:0] data_out;
+    wire [7:0] ie;
+    wire [7:0] if_reg;
+    wire [7:0] if_clear;
+    wire if_clear_we;
 
     cpu uut (
         .clk(clk),
@@ -24,32 +28,44 @@ module tb_cpu;
         .data_in(data_in),
         .we(we),
         .addr(addr),
-        .data_out(data_out)
+        .data_out(data_out),
+        .ie(ie), // Interrupt Enable register
+        .if_reg(if_reg), // Interrupt Flag register
+        .if_clear(if_clear), // Interrupt Clear register
+        .if_clear_we(if_clear_we) // Interrupt Clear Write Enable
     );
 
     reg [7:0] ram [0:65535]; // Full 64KB address space
 
     initial begin
-        // Copy ROM contents into RAM
-        ram[0] = 8'hCD;
-        ram[1] = 8'h05;
-        ram[2] = 8'h00;
-        ram[3] = 8'hC3; // JP nn
-        ram[4] = 8'h03; // low byte - jump to 0x0003
-        ram[5] = 8'h00; // high byte
-        ram[6] = 8'hC9; // RET
-
+        ram[0] = 8'h31;    // LD SP, nn
+        ram[1] = 8'hFE;    // SP = 0xDFFE (in WRAM)
+        ram[2] = 8'hDF;
+        ram[3] = 8'h3E;    // LD A, n
+        ram[4] = 8'h42;    // A = 0x42
+        ram[5] = 8'hEA;    // LD (nn), A  - store A to address
+        ram[6] = 8'h00;    // low byte of address
+        ram[7] = 8'hC0;    // high byte - store to 0xC000 (WRAM)
+        ram[8] = 8'hFA;    // LD A, (nn) - load from same address
+        ram[9] = 8'h00;    // low byte
+        ram[10] = 8'hC0;   // high byte
+        ram[11] = 8'hC3;   // JP to itself
+        ram[12] = 8'h0B;
+        ram[13] = 8'h00;
     end
 
     initial begin
         $dumpfile("sim/waves/tb_cpu.vcd");
         $dumpvars(0, tb_cpu);
-        $monitor("t=%0t pc=%h sp=%h ret_addr=%h", $time, uut.pc, uut.sp, uut.ret_addr);
+        $monitor("t=%0t state=%0d we=%b addr=%h data_out=%h mem_data=%h src=%0d a=%h", 
+         $time, uut.state, uut.we, uut.addr, uut.data_out, uut.mem_data, uut.src, uut.a);
         clk = 0;
         rst = 1;
         data_in = 8'h00;
         #20 rst = 0; // Release reset after 20ns
         // Additional test cases can be added here to cover more instructions and scenarios
+        #800;
+        $display("ram[C000] = %h", ram[16'hC000]);
         #1500;
         $finish; // End simulation after 100ns
     end

@@ -20,12 +20,12 @@ module memory_map (
     output reg [7:0] if_reg    // 0xFF0F
 );
 
+reg [7:0] rom [0:32767]; // 32KB ROM
+reg [7:0] wram [0:8191]; // 8KB Work RAM
+
 initial begin
     $readmemh("rom.hex", rom);
 end
-
-reg [7:0] rom [0:32767]; // 32KB ROM
-reg [7:0] wram [0:8191]; // 8KB Work RAM
 
 always @(posedge clk or posedge rst) begin
     if (rst) begin
