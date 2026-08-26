@@ -1,1 +1,8 @@
-sim/
+*.vvp
+*.vcd
+*.log
+*.jou
+.Xil/
+*.runs/
+*.cache/
+roms/boot/
