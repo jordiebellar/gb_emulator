@@ -175,7 +175,7 @@ module memory_map (
     // --- ie / if register writes ---------------------------------------
     // plain read/write storage for now, gated on ce like everything else
     // TODO: if_reg set side needs irq_* inputs, see note above
-    always @(posedge clk_100mhz or posedge rst) begin
+    always @(posedge clk_100m or posedge rst) begin
         if (rst) begin
             ie_reg <= 8'h00;
             if_reg <= 8'h00;
