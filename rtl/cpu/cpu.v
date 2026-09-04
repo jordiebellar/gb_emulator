@@ -2,7 +2,7 @@
 // Project      : GameBoy Emulator
 // File         : cpu.v
 // Author       : Jordie Bellar
-// Date         : 2026-08-03
+// Date         : 2026-09-04
 // Description  : Implements the SM83 CPU core. Responsible for fetch,
 //                decode, and execute of all instructions. Manages
 //                internal registers, flags, and memory bus interface.
@@ -75,6 +75,8 @@ module cpu (
     localparam ALU_PUSH   = 5'b10101; // PUSH register pairs
     localparam ALU_POP    = 5'b10111; // POP register pair from stack
     localparam ALU_JP_CC  = 5'b11000; // Conditional absolute jumps
+    localparam ALU_ADC    = 5'b11001; // Add with carry
+    localparam ALU_SBC    = 5'b11010; // Subtract with carry
 
     // Registers
     reg [15:0] pc;   // Program Counter
@@ -98,6 +100,10 @@ module cpu (
     // For Memory Read/Write
     reg mem_read_after_imm; // Flag to indicate that we need to read from memory after fetching immediate value
     reg mem_write_after_imm; // Flag to indicate that we need to write to memory after fetching immediate value
+
+    // ALU Memory Read
+    reg mem_alu_read;  // Flag to indicate that we need to read from memory before ALU operation
+    reg [15:0] mem_alu_data; // Holds the value read from memory for ALU operation
 
     // Instruction Decoding
     reg [2:0] src;
@@ -174,6 +180,7 @@ module cpu (
             if_clear_we <= 1'b0;
             mem_addr <= 16'h0000;
             mem_data <= 16'h0000;
+            mem_alu_read <= 1'b0;
         end
         else begin           
             // State Machine for Fetch, Decode, Execute
@@ -341,51 +348,99 @@ module cpu (
                     end
 
                     else if (ir[7:6] == 2'b10 && ir[5:3] == 3'b000) begin
-                        // ADD r
+                        // ADD A, r
                         src <= ir[2:0]; // Set source register
                         dst <= 3'b111; // Set destination register to A (Accumulator)
                         alu_op <= ALU_ADD; // Identify as ADD instruction
-                        state <= STATE_EXECUTE; // Move to execute state
+                        if (ir[2:0] == 3'b110) begin
+                            // ADD A, (HL)
+                            mem_addr <= {h, l}; // Set memory address to HL for read
+                            mem_alu_read <= 1'b1; // Set flag to read from memory before ALU operation
+                            state <= STATE_MEM_READ; // Move to memory read state
+                        end
+                        else begin
+                            state <= STATE_EXECUTE; // Move to execute state
+                        end
                     end
 
                     else if (ir[7:6] == 2'b10 && ir[5:3] == 3'b010) begin
-                        // SUB r
+                        // SUB A, r
                         src <= ir[2:0]; // Set source register
                         dst <= 3'b111; // Set destination register to A (Accumulator)
                         alu_op <= ALU_SUB; // Identify as SUB instruction
-                        state <= STATE_EXECUTE; // Move to execute state
+                        if (ir[2:0] == 3'b110) begin
+                            // SUB A, (HL)
+                            mem_addr <= {h, l}; // Set memory address to HL for read
+                            mem_alu_read <= 1'b1; // Set flag to read from memory before ALU operation
+                            state <= STATE_MEM_READ; // Move to memory read state
+                        end
+                        else begin
+                            state <= STATE_EXECUTE; // Move to execute state
+                        end
                     end
 
                     else if (ir[7:6] == 2'b10 && ir[5:3] == 3'b100) begin
-                        // AND r
+                        // AND A, r
                         src <= ir[2:0]; // Set source register
                         dst <= 3'b111; // Set destination register to A (Accumulator)
                         alu_op <= ALU_AND; // Identify as AND instruction
-                        state <= STATE_EXECUTE; // Move to execute state
+                        if (ir[2:0] == 3'b110) begin
+                            // AND A, (HL)
+                            mem_addr <= {h, l}; // Set memory address to HL for read
+                            mem_alu_read <= 1'b1; // Set flag to read from memory before ALU operation
+                            state <= STATE_MEM_READ; // Move to memory read state
+                        end
+                        else begin
+                            state <= STATE_EXECUTE; // Move to execute state
+                        end
                     end
 
                     else if (ir[7:6] == 2'b10 && ir[5:3] == 3'b101) begin
-                        // XOR r
+                        // XOR A, r
                         src <= ir[2:0]; // Set source register
                         dst <= 3'b111; // Set destination register to A (Accumulator)
                         alu_op <= ALU_XOR; // Identify as XOR instruction
-                        state <= STATE_EXECUTE; // Move to execute state
+                        if (ir[2:0] == 3'b110) begin
+                            // XOR A, (HL)
+                            mem_addr <= {h, l}; // Set memory address to HL for read
+                            mem_alu_read <= 1'b1; // Set flag to read from memory before ALU operation
+                            state <= STATE_MEM_READ; // Move to memory read state
+                        end
+                        else begin
+                            state <= STATE_EXECUTE; // Move to execute state
+                        end
                     end
 
                     else if (ir[7:6] == 2'b10 && ir[5:3] == 3'b110) begin
-                        // OR r
+                        // OR A, r
                         src <= ir[2:0]; // Set source register
                         dst <= 3'b111; // Set destination register to A (Accumulator)
                         alu_op <= ALU_OR; // Identify as OR instruction
-                        state <= STATE_EXECUTE; // Move to execute state
+                        if (ir[2:0] == 3'b110) begin
+                            // OR A, (HL)
+                            mem_addr <= {h, l}; // Set memory address to HL for read
+                            mem_alu_read <= 1'b1; // Set flag to read from memory before ALU operation
+                            state <= STATE_MEM_READ; // Move to memory read state
+                        end
+                        else begin
+                            state <= STATE_EXECUTE; // Move to execute state
+                        end
                     end
 
                     else if (ir[7:6] == 2'b10 && ir[5:3] == 3'b111) begin
-                        // CP r
+                        // CP A, r
                         src <= ir[2:0]; // Set source register
                         dst <= 3'b111; // Set destination register to A (Accumulator)
                         alu_op <= ALU_CP; // Identify as CP instruction
-                        state <= STATE_EXECUTE; // Move to execute state
+                        if (ir[2:0] == 3'b110) begin
+                            // CP A, (HL)
+                            mem_addr <= {h, l}; // Set memory address to HL for read
+                            mem_alu_read <= 1'b1; // Set flag to read from memory before ALU operation
+                            state <= STATE_MEM_READ; // Move to memory read state
+                        end
+                        else begin
+                            state <= STATE_EXECUTE; // Move to execute state
+                        end
                     end
 
                     else if (ir[7:6] == 2'b11 && ir[2:0] == 3'b011) begin
@@ -543,6 +598,38 @@ module cpu (
                         state <= STATE_FETCH_IMM; // Move to fetch immediate state
                     end
 
+                    else if (ir[7:6] == 2'b10 && ir[5:3] == 3'b001) begin
+                        // ADC A, r
+                        alu_op <= ALU_ADC; // Identify as ADC instruction
+                        src <= ir[2:0]; // Set source register
+                        dst <= 3'b111; // Set destination register to A (Accumulator)
+                        if (ir[2:0] == 3'b110) begin
+                            // ADC A, (HL)
+                            mem_addr <= {h, l}; // Set memory address to HL for read
+                            mem_alu_read <= 1'b1; // Set flag to read from memory before ALU operation
+                            state <= STATE_MEM_READ; // Move to memory read state
+                        end
+                        else begin
+                            state <= STATE_EXECUTE; // Move to execute state
+                        end
+                    end
+
+                    else if (ir[7:6] == 2'b10 && ir[5:3] == 3'b011) begin
+                        // SBC A, r
+                        alu_op <= ALU_SBC; // Identify as SBC instruction
+                        src <= ir[2:0]; // Set source register
+                        dst <= 3'b111; // Set destination register to A (Accumulator)
+                        if (ir[2:0] == 3'b110) begin
+                            // SBC A, (HL)
+                            mem_addr <= {h, l}; // Set memory address to HL for read
+                            mem_alu_read <= 1'b1; // Set flag to read from memory before ALU operation
+                            state <= STATE_MEM_READ; // Move to memory read state
+                        end
+                        else begin
+                            state <= STATE_EXECUTE; // Move to execute state
+                        end
+                    end
+
                     else begin
                         state <= STATE_FETCH;
                     end
@@ -666,67 +753,135 @@ module cpu (
 
                         ALU_ADD: begin
                             // Handle ADD A, r instruction
-                            f[F_Z] <= ((a + get_reg(src)) == 8'h00); // Set Zero flag if result is zero
-                            f[F_H] <= ((a & 4'hF) + (get_reg(src) & 4'hF) > 4'hF); // Set Half Carry flag if there is a carry from bit 3
-                            f[F_C] <= ({1'b0, a} + {1'b0, get_reg(src)} > 9'h0FF); // Set Carry flag if there is a carry from bit 7
-                            f[F_N] <= 1'b0; // Reset Subtract flag for ADD
-
-                            a <= a + get_reg(src); // Update Accumulator with result after flags are set
-                            state <= STATE_FETCH; // Return to fetch state after execution
+                            if(mem_alu_read) begin
+                                {f[F_C], a} <= a + mem_alu_data; // Add with carry from memory
+                                f[F_Z] <= (a + mem_alu_data == 8'h00); // Set Zero flag if result is zero
+                                f[F_H] <= ({1'b0, a & 4'hF} + {1'b0, mem_alu_data & 4'hF} > 5'h0F); // Set Half Carry flag if there is a carry from bit 3
+                                f[F_N] <= 1'b0; // Reset Subtract flag for ADC
+                                a <= a + mem_alu_data; // Update Accumulator with result after flags are set
+                                mem_alu_read <= 1'b0; // Reset memory read flag after operation
+                                mem_alu_data <= 8'h00; // Clear memory ALU data after operation
+                                state <= STATE_FETCH;
+                            end
+                            else begin
+                                f[F_Z] <= ((a + get_reg(src)) == 8'h00); // Set Zero flag if result is zero
+                                f[F_H] <= ({1'b0, a & 4'hF} + {1'b0, get_reg(src) & 4'hF} > 5'h0F); // Set Half Carry flag if there is a carry from bit 3
+                                f[F_C] <= ({1'b0, a} + {1'b0, get_reg(src)} > 9'h0FF); // Set Carry flag if there is a carry from bit 7
+                                f[F_N] <= 1'b0; // Reset Subtract flag for ADD
+                                a <= a + get_reg(src); // Update Accumulator with result after flags are set
+                                state <= STATE_FETCH; // Return to fetch state after execution
+                            end
                         end
 
                         ALU_SUB: begin
                             // Handle SUB A, r instruction
-                            f[F_Z] <= ((a - get_reg(src)) == 8'h00); // Set Zero flag if result is zero
-                            f[F_H] <= ((a & 4'hF) < (get_reg(src) & 4'hF)); // Set Half Carry flag if there is a borrow from bit 4
-                            f[F_C] <= (a < get_reg(src)); // Set Carry flag if there is a borrow from bit 7
-                            f[F_N] <= 1'b1; // Set Subtract flag for SUB
-
-                            a <= a - get_reg(src); // Update Accumulator with result after flags are set
-                            state <= STATE_FETCH; // Return to fetch state after execution
+                            if(mem_alu_read) begin
+                                {f[F_C], a} <= a - mem_alu_data; // Subtract with borrow from memory
+                                f[F_Z] <= (a - mem_alu_data == 8'h00); // Set Zero flag if result is zero
+                                f[F_H] <= ({1'b0, a & 4'hF} < {1'b0, mem_alu_data & 4'hF}); // Set Half Carry flag if there is a borrow from bit 4
+                                f[F_N] <= 1'b1; // Set Subtract flag for SUB
+                                a <= a - mem_alu_data; // Update Accumulator with result after flags are set
+                                mem_alu_read <= 1'b0; // Reset memory read flag after operation
+                                mem_alu_data <= 8'h00; // Clear memory ALU data after operation
+                                state <= STATE_FETCH;
+                            end
+                            else begin
+                                f[F_Z] <= ((a - get_reg(src)) == 8'h00); // Set Zero flag if result is zero
+                                f[F_H] <= ({1'b0, a & 4'hF} < {1'b0, get_reg(src) & 4'hF}); // Set Half Carry flag if there is a borrow from bit 4
+                                f[F_C] <= ({1'b0, a} < {1'b0, get_reg(src)}); // Set Carry flag if there is a borrow from bit 7
+                                f[F_N] <= 1'b1; // Set Subtract flag for SUB
+                                a <= a - get_reg(src); // Update Accumulator with result after flags are set
+                                state <= STATE_FETCH; // Return to fetch state after execution                                
+                            end
                         end
 
                         ALU_AND: begin
                             // Handle AND A, r instruction
-                            f[F_Z] <= ((a & get_reg(src)) == 8'h00); // Set Zero flag if result is zero
-                            f[F_H] <= 1'b1; // Set Half Carry flag for AND
-                            f[F_C] <= 1'b0; // Reset Carry flag for AND
-                            f[F_N] <= 1'b0; // Reset Subtract flag for AND
-
-                            a <= a & get_reg(src); // Update Accumulator with result after flags are set
-                            state <= STATE_FETCH; // Return to fetch state after execution
+                            if(mem_alu_read) begin
+                                a <= a & mem_alu_data; // Perform AND operation with memory data
+                                f[F_Z] <= (a & mem_alu_data == 8'h00); // Set Zero flag if result is zero
+                                f[F_H] <= 1'b1; // Set Half Carry flag for AND
+                                f[F_C] <= 1'b0; // Reset Carry flag for AND
+                                f[F_N] <= 1'b0; // Reset Subtract flag for AND
+                                a <= a & mem_alu_data; // Update Accumulator with result after flags are set
+                                mem_alu_read <= 1'b0; // Reset memory read flag after operation
+                                mem_alu_data <= 8'h00; // Clear memory ALU data after operation
+                                state <= STATE_FETCH;
+                            end
+                            else begin
+                                f[F_Z] <= ((a & get_reg(src)) == 8'h00); // Set Zero flag if result is zero
+                                f[F_H] <= 1'b1; // Set Half Carry flag for AND
+                                f[F_C] <= 1'b0; // Reset Carry flag for AND
+                                f[F_N] <= 1'b0; // Reset Subtract flag for AND
+                                a <= a & get_reg(src); // Update Accumulator with result after flags are set
+                                state <= STATE_FETCH; // Return to fetch state after execution
+                            end
                         end
 
                         ALU_XOR: begin
                             // Handle XOR A, r instruction
-                            f[F_Z] <= ((a ^ get_reg(src)) == 8'h00); // Set Zero flag if result is zero
-                            f[F_H] <= 1'b0; // Reset Half Carry flag for XOR
-                            f[F_C] <= 1'b0; // Reset Carry flag for XOR
-                            f[F_N] <= 1'b0; // Reset Subtract flag for XOR
-
-                            a <= a ^ get_reg(src); // Update Accumulator with result after flags are set
-                            state <= STATE_FETCH; // Return to fetch state after execution
+                            if(mem_alu_read) begin
+                                a <= a ^ mem_alu_data; // Perform XOR operation with memory data
+                                f[F_Z] <= (a ^ mem_alu_data == 8'h00); // Set Zero flag if result is zero
+                                f[F_H] <= 1'b0; // Reset Half Carry flag for XOR
+                                f[F_C] <= 1'b0; // Reset Carry flag for XOR
+                                f[F_N] <= 1'b0; // Reset Subtract flag for XOR
+                                a <= a ^ mem_alu_data; // Update Accumulator with result after flags are set
+                                mem_alu_read <= 1'b0; // Reset memory read flag after operation
+                                mem_alu_data <= 8'h00; // Clear memory ALU data after operation
+                                state <= STATE_FETCH;
+                            end
+                            else begin
+                                f[F_Z] <= ((a ^ get_reg(src)) == 8'h00); // Set Zero flag if result is zero
+                                f[F_H] <= 1'b0; // Reset Half Carry flag for XOR
+                                f[F_C] <= 1'b0; // Reset Carry flag for XOR
+                                f[F_N] <= 1'b0; // Reset Subtract flag for XOR
+                                a <= a ^ get_reg(src); // Update Accumulator with result after flags are set
+                                state <= STATE_FETCH; // Return to fetch state after execution
+                            end
                         end
 
                         ALU_OR: begin
                             // Handle OR A, r instruction
-                            f[F_Z] <= ((a | get_reg(src)) == 8'h00); // Set Zero flag if result is zero
-                            f[F_H] <= 1'b0; // Reset Half Carry flag for OR
-                            f[F_C] <= 1'b0; // Reset Carry flag for OR
-                            f[F_N] <= 1'b0; // Reset Subtract flag for OR
-
-                            a <= a | get_reg(src); // Update Accumulator with result after flags are set
-                            state <= STATE_FETCH; // Return to fetch state after execution
+                            if(mem_alu_read) begin
+                                a <= a | mem_alu_data; // Perform OR operation with memory data
+                                f[F_Z] <= (a | mem_alu_data == 8'h00); // Set Zero flag if result is zero
+                                f[F_H] <= 1'b0; // Reset Half Carry flag for OR
+                                f[F_C] <= 1'b0; // Reset Carry flag for OR
+                                f[F_N] <= 1'b0; // Reset Subtract flag for OR
+                                a <= a | mem_alu_data; // Update Accumulator with result after flags are set
+                                mem_alu_read <= 1'b0; // Reset memory read flag after operation
+                                mem_alu_data <= 8'h00; // Clear memory ALU data after operation
+                                state <= STATE_FETCH;
+                            end
+                            else begin
+                                f[F_Z] <= ((a | get_reg(src)) == 8'h00); // Set Zero flag if result is zero
+                                f[F_H] <= 1'b0; // Reset Half Carry flag for OR
+                                f[F_C] <= 1'b0; // Reset Carry flag for OR
+                                f[F_N] <= 1'b0; // Reset Subtract flag for OR
+                                a <= a | get_reg(src); // Update Accumulator with result after flags are set
+                                state <= STATE_FETCH; // Return to fetch state after execution
+                            end
                         end
 
                         ALU_CP: begin
                             // Handle CP A, r instruction
-                            f[F_Z] <= ((a - get_reg(src)) == 8'h00); // Set Zero flag if result is zero
-                            f[F_H] <= ((a & 4'hF) < (get_reg(src) & 4'hF)); // Set Half Carry flag if there is a borrow from bit 4
-                            f[F_C] <= (a < get_reg(src)); // Set Carry flag if there is a borrow from bit 7
-                            f[F_N] <= 1'b1; // Set Subtract flag for CP
-
-                            state <= STATE_FETCH; // Return to fetch state after execution
+                            if(mem_alu_read) begin
+                                f[F_Z] <= (a - mem_alu_data == 8'h00); // Set Zero flag if result is zero
+                                f[F_H] <= ({1'b0, a & 4'hF} < {1'b0, mem_alu_data & 4'hF}); // Set Half Carry flag if there is a borrow from bit 4
+                                f[F_C] <= ({1'b0, a} < {1'b0, mem_alu_data}); // Set Carry flag if there is a borrow from bit 7
+                                f[F_N] <= 1'b1; // Set Subtract flag for CP
+                                mem_alu_read <= 1'b0; // Reset memory read flag after operation
+                                mem_alu_data <= 8'h00; // Clear memory ALU data after operation
+                                state <= STATE_FETCH;
+                            end
+                            else begin
+                                f[F_Z] <= ((a - get_reg(src)) == 8'h00); // Set Zero flag if result is zero
+                                f[F_H] <= ({1'b0, a & 4'hF} < {1'b0, get_reg(src) & 4'hF}); // Set Half Carry flag if there is a borrow from bit 4
+                                f[F_C] <= ({1'b0, a} < {1'b0, get_reg(src)}); // Set Carry flag if there is a borrow from bit 7
+                                f[F_N] <= 1'b1; // Set Subtract flag for CP
+                                state <= STATE_FETCH; // Return to fetch state after execution
+                            end
                         end
 
                         ALU_JP_IMM: begin
@@ -831,6 +986,50 @@ module cpu (
                             state <= STATE_FETCH; // Return to fetch state after execution
                         end
 
+                        ALU_ADC: begin
+                            // Handle ADC A, r instruction
+                            if(mem_alu_read) begin
+                                {f[F_C], a} <= a + mem_alu_data + f[F_C]; // Add with carry from memory
+                                f[F_Z] <= (a + mem_alu_data + f[F_C] == 8'h00); // Set Zero flag if result is zero
+                                f[F_H] <= ({1'b0, a & 4'hF} + {1'b0, mem_alu_data & 4'hF} + f[F_C] > 5'h0F); // Set Half Carry flag if there is a carry from bit 3
+                                f[F_N] <= 1'b0; // Reset Subtract flag for ADC
+                                a <= a + mem_alu_data + f[F_C]; // Update Accumulator with result after flags are set
+                                mem_alu_read <= 1'b0; // Reset memory read flag after operation
+                                mem_alu_data <= 8'h00; // Clear memory ALU data after operation
+                                state <= STATE_FETCH;
+                            end
+                            else begin
+                                {f[F_C], a} <= a + get_reg(src) + f[F_C]; // Add with carry
+                                f[F_Z] <= (a + get_reg(src) + f[F_C] == 8'h00); // Set Zero flag if result is zero
+                                f[F_H] <= ({1'b0, a & 4'hF} + {1'b0, get_reg(src) & 4'hF} + f[F_C] > 5'h0F); // Set Half Carry flag if there is a carry from bit 3
+                                f[F_N] <= 1'b0; // Reset Subtract flag for ADC
+                                a <= a + get_reg(src) + f[F_C]; // Update Accumulator with result after flags are set
+                                state <= STATE_FETCH; // Return to fetch state after execution
+                            end      
+                        end
+
+                        ALU_SBC: begin
+                            // Handle SBC A, r instruction
+                            if(mem_alu_read) begin
+                                {f[F_C], a} <= a - mem_alu_data - f[F_C]; // Subtract with borrow from memory
+                                f[F_Z] <= (a - mem_alu_data - f[F_C] == 8'h00); // Set Zero flag if result is zero
+                                f[F_H] <= ({1'b0, a & 4'hF} < {1'b0, mem_alu_data & 4'hF} + f[F_C]); // Set Half Carry flag if there is a borrow from bit 4
+                                f[F_N] <= 1'b1; // Set Subtract flag for SBC
+                                a <= a - mem_alu_data - f[F_C]; // Update Accumulator with result after flags are set
+                                mem_alu_read <= 1'b0; // Reset memory read flag after operation
+                                mem_alu_data <= 8'h00; // Clear memory ALU data after operation
+                                state <= STATE_FETCH;
+                            end
+                            else begin
+                                {f[F_C], a} <= a - get_reg(src) - f[F_C]; // Subtract with borrow
+                                f[F_Z] <= (a - get_reg(src) - f[F_C] == 8'h00); // Set Zero flag if result is zero
+                                f[F_H] <= ({1'b0, a & 4'hF} < {1'b0, get_reg(src) & 4'hF} + f[F_C]); // Set Half Carry flag if there is a borrow from bit 4
+                                f[F_N] <= 1'b1; // Set Subtract flag for SBC
+                                state <= STATE_FETCH; // Return to fetch state after execution
+                                a <= a - get_reg(src) - f[F_C]; // Update Accumulator with result after flags are set
+                            end
+                        end
+
                         default: state <= STATE_FETCH; // For unimplemented ALU operations, return to fetch
                 
                     endcase
@@ -917,18 +1116,26 @@ module cpu (
                         fetch_ready <= 1'b1;
                     end
                     else if (fetch_ready) begin
-                        case (dst)
-                            REG_B:  b <= data_in;
-                            REG_C:  c <= data_in;
-                            REG_D:  d <= data_in;
-                            REG_E:  e <= data_in;
-                            REG_H:  h <= data_in;
-                            REG_L:  l <= data_in;
-                            REG_A:  a <= data_in;
-                            default: ; // No operation for invalid destination
-                        endcase
-                        fetch_ready <= 1'b0;
-                        state <= STATE_FETCH;
+                        if (!mem_alu_read) begin
+                            case (dst)
+                                REG_B:  b <= data_in;
+                                REG_C:  c <= data_in;
+                                REG_D:  d <= data_in;
+                                REG_E:  e <= data_in;
+                                REG_H:  h <= data_in;
+                                REG_L:  l <= data_in;
+                                REG_A:  a <= data_in;
+                                default: ; // No operation for invalid destination
+                            endcase
+                            fetch_ready <= 1'b0;
+                            state <= STATE_FETCH;
+                        end
+                        else begin
+                            // If we are reading from memory for an ALU operation, store the data in a temporary register
+                            mem_alu_data <= data_in;
+                            fetch_ready <= 1'b0;
+                            state <= STATE_EXECUTE;
+                        end
                     end
                 end
 
