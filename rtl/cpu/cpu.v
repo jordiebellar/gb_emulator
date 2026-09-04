@@ -181,6 +181,7 @@ module cpu (
             mem_addr <= 16'h0000;
             mem_data <= 16'h0000;
             mem_alu_read <= 1'b0;
+            mem_alu_data <= 16'h0000;
         end
         else begin           
             // State Machine for Fetch, Decode, Execute
@@ -754,21 +755,19 @@ module cpu (
                         ALU_ADD: begin
                             // Handle ADD A, r instruction
                             if(mem_alu_read) begin
-                                {f[F_C], a} <= a + mem_alu_data; // Add with carry from memory
+                                {f[F_C], a} <= a + mem_alu_data; // Set Carry flag and update Accumulator with result from memory
                                 f[F_Z] <= (a + mem_alu_data == 8'h00); // Set Zero flag if result is zero
                                 f[F_H] <= ({1'b0, a & 4'hF} + {1'b0, mem_alu_data & 4'hF} > 5'h0F); // Set Half Carry flag if there is a carry from bit 3
                                 f[F_N] <= 1'b0; // Reset Subtract flag for ADC
-                                a <= a + mem_alu_data; // Update Accumulator with result after flags are set
                                 mem_alu_read <= 1'b0; // Reset memory read flag after operation
                                 mem_alu_data <= 8'h00; // Clear memory ALU data after operation
                                 state <= STATE_FETCH;
                             end
                             else begin
+                                {f[F_C], a} <= a + get_reg(src); // Set Carry flag and update Accumulator with result from register
                                 f[F_Z] <= ((a + get_reg(src)) == 8'h00); // Set Zero flag if result is zero
                                 f[F_H] <= ({1'b0, a & 4'hF} + {1'b0, get_reg(src) & 4'hF} > 5'h0F); // Set Half Carry flag if there is a carry from bit 3
-                                f[F_C] <= ({1'b0, a} + {1'b0, get_reg(src)} > 9'h0FF); // Set Carry flag if there is a carry from bit 7
                                 f[F_N] <= 1'b0; // Reset Subtract flag for ADD
-                                a <= a + get_reg(src); // Update Accumulator with result after flags are set
                                 state <= STATE_FETCH; // Return to fetch state after execution
                             end
                         end
@@ -776,21 +775,19 @@ module cpu (
                         ALU_SUB: begin
                             // Handle SUB A, r instruction
                             if(mem_alu_read) begin
-                                {f[F_C], a} <= a - mem_alu_data; // Subtract with borrow from memory
-                                f[F_Z] <= (a - mem_alu_data == 8'h00); // Set Zero flag if result is zero
+                                {f[F_C], a} <= a - mem_alu_data; // Set Carry flag and update Accumulator with result from memory
+                                f[F_Z] <= ((a - mem_alu_data) == 8'h00); // Set Zero flag if result is zero
                                 f[F_H] <= ({1'b0, a & 4'hF} < {1'b0, mem_alu_data & 4'hF}); // Set Half Carry flag if there is a borrow from bit 4
                                 f[F_N] <= 1'b1; // Set Subtract flag for SUB
-                                a <= a - mem_alu_data; // Update Accumulator with result after flags are set
                                 mem_alu_read <= 1'b0; // Reset memory read flag after operation
                                 mem_alu_data <= 8'h00; // Clear memory ALU data after operation
                                 state <= STATE_FETCH;
                             end
                             else begin
+                                {f[F_C], a} <= a - get_reg(src); // Set Carry flag and update Accumulator with result from register
                                 f[F_Z] <= ((a - get_reg(src)) == 8'h00); // Set Zero flag if result is zero
                                 f[F_H] <= ({1'b0, a & 4'hF} < {1'b0, get_reg(src) & 4'hF}); // Set Half Carry flag if there is a borrow from bit 4
-                                f[F_C] <= ({1'b0, a} < {1'b0, get_reg(src)}); // Set Carry flag if there is a borrow from bit 7
                                 f[F_N] <= 1'b1; // Set Subtract flag for SUB
-                                a <= a - get_reg(src); // Update Accumulator with result after flags are set
                                 state <= STATE_FETCH; // Return to fetch state after execution                                
                             end
                         end
@@ -798,8 +795,7 @@ module cpu (
                         ALU_AND: begin
                             // Handle AND A, r instruction
                             if(mem_alu_read) begin
-                                a <= a & mem_alu_data; // Perform AND operation with memory data
-                                f[F_Z] <= (a & mem_alu_data == 8'h00); // Set Zero flag if result is zero
+                                f[F_Z] <= ((a & mem_alu_data) == 8'h00); // Set Zero flag if result is zero
                                 f[F_H] <= 1'b1; // Set Half Carry flag for AND
                                 f[F_C] <= 1'b0; // Reset Carry flag for AND
                                 f[F_N] <= 1'b0; // Reset Subtract flag for AND
@@ -821,8 +817,7 @@ module cpu (
                         ALU_XOR: begin
                             // Handle XOR A, r instruction
                             if(mem_alu_read) begin
-                                a <= a ^ mem_alu_data; // Perform XOR operation with memory data
-                                f[F_Z] <= (a ^ mem_alu_data == 8'h00); // Set Zero flag if result is zero
+                                f[F_Z] <= ((a ^ mem_alu_data) == 8'h00); // Set Zero flag if result is zero
                                 f[F_H] <= 1'b0; // Reset Half Carry flag for XOR
                                 f[F_C] <= 1'b0; // Reset Carry flag for XOR
                                 f[F_N] <= 1'b0; // Reset Subtract flag for XOR
@@ -844,8 +839,7 @@ module cpu (
                         ALU_OR: begin
                             // Handle OR A, r instruction
                             if(mem_alu_read) begin
-                                a <= a | mem_alu_data; // Perform OR operation with memory data
-                                f[F_Z] <= (a | mem_alu_data == 8'h00); // Set Zero flag if result is zero
+                                f[F_Z] <= ((a | mem_alu_data) == 8'h00); // Set Zero flag if result is zero
                                 f[F_H] <= 1'b0; // Reset Half Carry flag for OR
                                 f[F_C] <= 1'b0; // Reset Carry flag for OR
                                 f[F_N] <= 1'b0; // Reset Subtract flag for OR
@@ -867,7 +861,7 @@ module cpu (
                         ALU_CP: begin
                             // Handle CP A, r instruction
                             if(mem_alu_read) begin
-                                f[F_Z] <= (a - mem_alu_data == 8'h00); // Set Zero flag if result is zero
+                                f[F_Z] <= ((a - mem_alu_data) == 8'h00); // Set Zero flag if result is zero
                                 f[F_H] <= ({1'b0, a & 4'hF} < {1'b0, mem_alu_data & 4'hF}); // Set Half Carry flag if there is a borrow from bit 4
                                 f[F_C] <= ({1'b0, a} < {1'b0, mem_alu_data}); // Set Carry flag if there is a borrow from bit 7
                                 f[F_N] <= 1'b1; // Set Subtract flag for CP
@@ -993,7 +987,6 @@ module cpu (
                                 f[F_Z] <= (a + mem_alu_data + f[F_C] == 8'h00); // Set Zero flag if result is zero
                                 f[F_H] <= ({1'b0, a & 4'hF} + {1'b0, mem_alu_data & 4'hF} + f[F_C] > 5'h0F); // Set Half Carry flag if there is a carry from bit 3
                                 f[F_N] <= 1'b0; // Reset Subtract flag for ADC
-                                a <= a + mem_alu_data + f[F_C]; // Update Accumulator with result after flags are set
                                 mem_alu_read <= 1'b0; // Reset memory read flag after operation
                                 mem_alu_data <= 8'h00; // Clear memory ALU data after operation
                                 state <= STATE_FETCH;
@@ -1003,7 +996,6 @@ module cpu (
                                 f[F_Z] <= (a + get_reg(src) + f[F_C] == 8'h00); // Set Zero flag if result is zero
                                 f[F_H] <= ({1'b0, a & 4'hF} + {1'b0, get_reg(src) & 4'hF} + f[F_C] > 5'h0F); // Set Half Carry flag if there is a carry from bit 3
                                 f[F_N] <= 1'b0; // Reset Subtract flag for ADC
-                                a <= a + get_reg(src) + f[F_C]; // Update Accumulator with result after flags are set
                                 state <= STATE_FETCH; // Return to fetch state after execution
                             end      
                         end
@@ -1015,7 +1007,6 @@ module cpu (
                                 f[F_Z] <= (a - mem_alu_data - f[F_C] == 8'h00); // Set Zero flag if result is zero
                                 f[F_H] <= ({1'b0, a & 4'hF} < {1'b0, mem_alu_data & 4'hF} + f[F_C]); // Set Half Carry flag if there is a borrow from bit 4
                                 f[F_N] <= 1'b1; // Set Subtract flag for SBC
-                                a <= a - mem_alu_data - f[F_C]; // Update Accumulator with result after flags are set
                                 mem_alu_read <= 1'b0; // Reset memory read flag after operation
                                 mem_alu_data <= 8'h00; // Clear memory ALU data after operation
                                 state <= STATE_FETCH;
@@ -1026,7 +1017,6 @@ module cpu (
                                 f[F_H] <= ({1'b0, a & 4'hF} < {1'b0, get_reg(src) & 4'hF} + f[F_C]); // Set Half Carry flag if there is a borrow from bit 4
                                 f[F_N] <= 1'b1; // Set Subtract flag for SBC
                                 state <= STATE_FETCH; // Return to fetch state after execution
-                                a <= a - get_reg(src) - f[F_C]; // Update Accumulator with result after flags are set
                             end
                         end
 
