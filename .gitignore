@@ -6,3 +6,4 @@
 *.runs/
 *.cache/
 roms/boot/
+roms/game/
