@@ -1,0 +1,42 @@
+// ROM image for tb_cpu.v verification program
+// Addresses are implicit (sequential) unless overridden by @hexaddr
+
+3E 01        // LD A, 0x01           (0000-0001)
+EA FF FF     // LD (0xFFFF), A       (0002-0004)  IE = 0x01
+76           // HALT                 (0005)       expect: stall (IE=1, IF=0)
+
+3E 00        // LD A, 0x00           (0006-0007)
+EA 0F FF     // LD (0xFF0F), A       (0008-000A)  IF = 0x00
+
+26 C0        // LD H, 0xC0           (000B-000C)
+2E 50        // LD L, 0x50           (000D-000E)  HL = 0xC050
+36 05        // LD (HL), 0x05        (000F-0010)  mem[0xC050] = 0x05
+3E 10        // LD A, 0x10           (0011-0012)
+86           // ADD A, (HL)          (0013)       expect: A = 0x15
+
+34           // INC (HL)             (0014)       expect: mem[0xC050] = 0x06
+
+31 00 D0     // LD SP, 0xD000        (0015-0017)  SP into WRAM (HRAM not yet mapped)
+CD 40 00     // CALL 0x0040          (0018-001A)
+06 CD        // LD B, 0xCD           (001B-001C)  only reached if RET returned correctly
+01 33 22     // LD BC, 0x2233        (001D-001F)
+11 55 44     // LD DE, 0x4455        (0020-0022)
+03           // INC BC               (0023)       expect: BC = 0x2234
+1B           // DEC DE               (0024)       expect: DE = 0x4454
+
+26 FF        // LD H, 0xFF           (0025-0026)
+2E FF        // LD L, 0xFF           (0027-0028)  HL = 0xFFFF
+01 01 00     // LD BC, 0x0001        (0029-002B)  reusing BC for this operand
+09           // ADD HL, BC           (002C)       expect: HL=0x0000, H=1, C=1
+31 BC 9A     // LD SP, 0x9ABC        (002D-002F)
+08 00 C1     // LD (0xC100), SP      (0030-0032)  expect: mem[C100]=0xBC, mem[C101]=0x9A
+
+26 12        // LD H, 0x12           (0033-0034)
+2E 34        // LD L, 0x34           (0035-0036)  HL = 0x1234
+F9           // LD SP, HL            (0037)       expect: SP = 0x1234
+
+C3 38 00     // JP 0x0038            (0038-003A)  trap: infinite loop at end of test
+
+@40
+3E AB        // LD A, 0xAB           (0040-0041)  marker inside subroutine
+C9           // RET                  (0042)

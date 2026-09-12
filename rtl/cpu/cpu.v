@@ -52,31 +52,36 @@ module cpu (
     localparam REG_A  = 3'd7;
 
     // ALU Operation Codes
-    localparam ALU_LD     = 5'b00001; // Load
-    localparam ALU_LD_IMM = 5'b00010; // Load Immediate
-    localparam ALU_INC    = 5'b00011; // Increment
-    localparam ALU_DEC    = 5'b00100; // Decrement
-    localparam ALU_ADD    = 5'b00101; // Add
-    localparam ALU_SUB    = 5'b00110; // Subtract
-    localparam ALU_AND    = 5'b00111; // AND
-    localparam ALU_XOR    = 5'b01000; // XOR
-    localparam ALU_OR     = 5'b01001; // OR
-    localparam ALU_CP     = 5'b01010; // Compare
-    localparam ALU_JP_IMM = 5'b01011; // Jump to Immediate Address
-    localparam ALU_JR     = 5'b01100; // Jump Relative
-    localparam ALU_JR_CC  = 5'b01101; // Jump Relative Conditional
-    localparam ALU_CALL   = 5'b01110; // Push to Stack
-    localparam ALU_RET    = 5'b01111; // Pop from Stack
-    localparam ALU_INT    = 5'b10000; // INT
-    localparam ALU_DI     = 5'b10001; // Disable Interrupts
-    localparam ALU_EI     = 5'b10010; // Enable Interrupts
-    localparam ALU_RETI   = 5'b10011; // RETI
-    localparam ALU_LD_SP  = 5'b10100; // Load into stack pointer
-    localparam ALU_PUSH   = 5'b10101; // PUSH register pairs
-    localparam ALU_POP    = 5'b10111; // POP register pair from stack
-    localparam ALU_JP_CC  = 5'b11000; // Conditional absolute jumps
-    localparam ALU_ADC    = 5'b11001; // Add with carry
-    localparam ALU_SBC    = 5'b11010; // Subtract with carry
+    localparam ALU_LD        = 6'b000001; // Load
+    localparam ALU_LD_IMM    = 6'b000010; // Load Immediate
+    localparam ALU_INC       = 6'b000011; // Increment
+    localparam ALU_DEC       = 6'b000100; // Decrement
+    localparam ALU_ADD       = 6'b000101; // Add
+    localparam ALU_SUB       = 6'b000110; // Subtract
+    localparam ALU_AND       = 6'b000111; // AND
+    localparam ALU_XOR       = 6'b001000; // XOR
+    localparam ALU_OR        = 6'b001001; // OR
+    localparam ALU_CP        = 6'b001010; // Compare
+    localparam ALU_JP_IMM    = 6'b001011; // Jump to Immediate Address
+    localparam ALU_JR        = 6'b001100; // Jump Relative
+    localparam ALU_JR_CC     = 6'b001101; // Jump Relative Conditional
+    localparam ALU_CALL      = 6'b001110; // Push to Stack
+    localparam ALU_RET       = 6'b001111; // Pop from Stack
+    localparam ALU_INT       = 6'b010000; // INT
+    localparam ALU_DI        = 6'b010001; // Disable Interrupts
+    localparam ALU_EI        = 6'b010010; // Enable Interrupts
+    localparam ALU_RETI      = 6'b010011; // RETI
+    localparam ALU_LD_SP     = 6'b010100; // Load into stack pointer
+    localparam ALU_PUSH      = 6'b010101; // PUSH register pairs
+    localparam ALU_POP       = 6'b010111; // POP register pair from stack
+    localparam ALU_JP_CC     = 6'b011000; // Conditional absolute jumps
+    localparam ALU_ADC       = 6'b011001; // Add with carry
+    localparam ALU_SBC       = 6'b011010; // Subtract with carry
+    localparam ALU_LD_SP_HL  = 6'b011011; // Load SP into HL
+    localparam ALU_LD_RR_IMM = 6'b011100; // Load register pair from immediate value
+    localparam ALU_INC_RR    = 6'b011101; // Increment register pair
+    localparam ALU_DEC_RR    = 6'b011110; // Decrement register pair
+    localparam ALU_ADD_HL_RR = 6'b011111; // Add register pair to HL
 
     // Registers
     reg [15:0] pc;   // Program Counter
@@ -95,6 +100,7 @@ module cpu (
 
     // Flags
     reg fetch_ready;
+    reg mem_wait;
     reg second_fetch;
     reg imm16;
     reg alu_imm; // Immediate value for ALU operations
@@ -110,7 +116,10 @@ module cpu (
     // Instruction Decoding
     reg [2:0] src;
     reg [2:0] dst;
-    reg [4:0] alu_op;
+    reg [5:0] alu_op;
+    reg [1:0] rp_sel;
+    reg mem_write_sp; // Flag to indicate that we need to write to memory at the stack pointer address
+    reg sp_write_low_done; // Flag to indicate that we have written the low byte of SP to memory
 
     // Immediate value for instructions that require it
     reg [7:0] n; // Immediate 8-bit value
@@ -144,6 +153,17 @@ module cpu (
             endcase
     endfunction
 
+    function [15:0] get_rp;
+        input [1:0] rp_id;
+            case (rp_id)
+                2'b00: get_rp = {b, c}; // BC
+                2'b01: get_rp = {d, e}; // DE
+                2'b10: get_rp = {h, l}; // HL
+                2'b11: get_rp = sp;     // SP
+                default: get_rp = 16'h0000;
+            endcase
+    endfunction
+
     // Loop
     always @(posedge clk or posedge rst) begin
         if (rst) begin
@@ -173,6 +193,9 @@ module cpu (
             ret_addr <= 16'h0000;
             second_stack_fetch <= 1'b0;
             push_after_imm <= 1'b0;
+            rp_sel <= 2'b00;
+            mem_write_sp <= 1'b0;
+            sp_write_low_done <= 1'b0;
             iv_addr <= 16'h0000;
             ime_pending <= 1'b0;
             we <= 1'b0;
@@ -185,6 +208,8 @@ module cpu (
             mem_alu_read <= 1'b0;
             mem_alu_data <= 16'h0000;
             alu_imm <= 1'b0;
+            mem_wait <= 1'b0;
+            ime <= 1'b0;
         end
         else begin           
             // State Machine for Fetch, Decode, Execute
@@ -229,10 +254,14 @@ module cpu (
                             we    <= 1'b0;         // Read operation
                             fetch_ready <= 1'b1;   // Indicate fetch is ready
                         end
+                        else if (!mem_wait) begin
+                            mem_wait <= 1'b1;
+                        end
                         else begin
                             ir <= data_in;         // Load fetched instruction into IR
                             pc <= pc + 1;          // Increment PC to point to next instruction
                             fetch_ready <= 1'b0;   // Reset fetch ready for next cycle
+                            mem_wait <= 1'b0;        // Reset memory wait for next cycle
                             state <= STATE_DECODE; // Move to decode state
                         end
                     end
@@ -245,7 +274,11 @@ module cpu (
                         we <= 1'b0;           // Read operation
                         fetch_ready <= 1'b1;   // Indicate fetch is ready
                     end
+                    else if(!mem_wait) begin
+                        mem_wait <= 1'b1;
+                    end
                     else if(fetch_ready && !second_fetch) begin
+                        mem_wait <= 1'b0;        // Reset memory wait for next cycle
                         if(!imm16) begin
                             n <= data_in;        // Load 8-bit immediate value into 'n'
                             pc <= pc + 1;        // Increment PC after fetching immediate
@@ -273,13 +306,20 @@ module cpu (
                         end
 
                     end
-                    else if(fetch_ready && second_fetch) begin
+                    else begin
+                        mem_wait <= 1'b0;        // Reset memory wait for next cycle
                         nn[15:8] <= data_in;   // Load upper 8 bits of 16-bit immediate value into 'nn'
                         pc <= pc + 1;          // Increment PC after fetching immediate
                         second_fetch <= 1'b0;    // Reset second fetch for next instruction
                         fetch_ready <= 1'b0;   // Reset fetch ready for next cycle
                         imm16 <= 1'b0;          // Reset imm16 for next instruction
-                        if(push_after_imm) begin
+                        if (mem_write_sp) begin
+                            mem_addr <= {data_in, nn[7:0]}; // Set memory address to the fetched 16-bit immediate value for write
+                            mem_data <= sp[7:0]; // Set data to be written from SP low byte
+                            sp_write_low_done <= 1'b0; // Reset sp_write_low_done flag
+                            state <= STATE_MEM_WRITE; // Move to memory write state
+                        end
+                        else if(push_after_imm) begin
                             ret_addr <= pc + 1;        // Store return address for CALL instruction
                             push_after_imm <= 1'b0; // Reset push_after_imm flag
                             state <= STATE_STACK_PUSH; // Move to stack push state to push return address onto stack
@@ -304,7 +344,160 @@ module cpu (
                 // Decode the fetched instruction
                 STATE_DECODE: begin
 
-                    if (ir[7:6] == 2'b01) begin
+                    if (ir == 8'hC6) begin
+                        // ADD A, n
+                        dst <= 3'b111; // Set destination register to A (Accumulator)
+                        imm16 <= 1'b0; // Set imm16 to indicate that we need to fetch an 8-bit immediate value
+                        alu_imm <= 1'b1; // Set flag to indicate that we need to use an immediate value for ALU operation
+                        alu_op <= ALU_ADD; // Identify as ADD A, n instruction
+                        state <= STATE_FETCH_IMM; // Move to fetch immediate state                        
+                    end
+
+                    else if (ir == 8'hCE) begin
+                        // ADC A, n
+                        dst <= 3'b111; // Set destination register to A (Accumulator)
+                        imm16 <= 1'b0; // Set imm16 to indicate that we need to fetch an 8-bit immediate value
+                        alu_imm <= 1'b1; // Set flag to indicate that we need to use an immediate value for ALU operation
+                        alu_op <= ALU_ADC; // Identify as ADC A, n instruction
+                        state <= STATE_FETCH_IMM; // Move to fetch immediate state                        
+                    end
+
+                    else if (ir == 8'hD6) begin
+                        // SUB A, n
+                        dst <= 3'b111; // Set destination register to A (Accumulator)
+                        imm16 <= 1'b0; // Set imm16 to indicate that we need to fetch an 8-bit immediate value
+                        alu_imm <= 1'b1; // Set flag to indicate that we need to use an immediate value for ALU operation
+                        alu_op <= ALU_SUB; // Identify as SUB A, n instruction
+                        state <= STATE_FETCH_IMM; // Move to fetch immediate state                        
+                    end
+
+                    else if (ir == 8'hDE) begin
+                        // SBC A, n
+                        dst <= 3'b111; // Set destination register to A (Accumulator)
+                        imm16 <= 1'b0; // Set imm16 to indicate that we need to fetch an 8-bit immediate value
+                        alu_imm <= 1'b1; // Set flag to indicate that we need to use an immediate value for ALU operation
+                        alu_op <= ALU_SBC; // Identify as SBC A, n instruction
+                        state <= STATE_FETCH_IMM; // Move to fetch immediate state                        
+                    end
+
+                    else if (ir == 8'hE6) begin
+                        // AND A, n
+                        dst <= 3'b111; // Set destination register to A (Accumulator)
+                        imm16 <= 1'b0; // Set imm16 to indicate that we need to fetch an 8-bit immediate value
+                        alu_imm <= 1'b1; // Set flag to indicate that we need to use an immediate value for ALU operation
+                        alu_op <= ALU_AND; // Identify as AND A, n instruction
+                        state <= STATE_FETCH_IMM; // Move to fetch immediate state                        
+                    end
+
+                    else if (ir == 8'hEE) begin
+                        // XOR A, n
+                        dst <= 3'b111; // Set destination register to A (Accumulator)
+                        imm16 <= 1'b0; // Set imm16 to indicate that we need to fetch an 8-bit immediate value
+                        alu_imm <= 1'b1; // Set flag to indicate that we need to use an immediate value for ALU operation
+                        alu_op <= ALU_XOR; // Identify as XOR A, n instruction
+                        state <= STATE_FETCH_IMM; // Move to fetch immediate state                        
+                    end
+
+                    else if (ir == 8'hF6) begin
+                        // OR A, n
+                        dst <= 3'b111; // Set destination register to A (Accumulator)
+                        imm16 <= 1'b0; // Set imm16 to indicate that we need to fetch an 8-bit immediate value
+                        alu_imm <= 1'b1; // Set flag to indicate that we need to use an immediate value for ALU operation
+                        alu_op <= ALU_OR; // Identify as OR A, n instruction
+                        state <= STATE_FETCH_IMM; // Move to fetch immediate state                        
+                    end
+
+                    else if (ir == 8'hFE) begin
+                        // CP A, n
+                        dst <= 3'b111; // Set destination register to A (Accumulator)
+                        imm16 <= 1'b0; // Set imm16 to indicate that we need to fetch an 8-bit immediate value
+                        alu_imm <= 1'b1; // Set flag to indicate that we need to use an immediate value for ALU operation
+                        alu_op <= ALU_CP; // Identify as CP A, n instruction
+                        state <= STATE_FETCH_IMM; // Move to fetch immediate state                        
+                    end
+
+                    else if (ir == 8'hF3) begin
+                        // DI
+                        alu_op <= ALU_DI; // Identify as DI instruction
+                        state <= STATE_EXECUTE;
+                    end
+
+                    else if (ir == 8'hFB) begin
+                        // EI
+                        alu_op <= ALU_EI; // Identify as EI instruction
+                        state <= STATE_EXECUTE;
+                    end
+
+                    else if (ir == 8'hD9) begin
+                        // RETI
+                        alu_op <= ALU_RETI; // Identify as RETI instruction
+                        state <= STATE_STACK_POP;
+                    end
+
+                    else if (ir == 8'h76) begin
+                        // HALT
+                        // Need to implement bug where HALT does not work if IME is disabled and no interrupts are pending
+                        state <= STATE_HALT; // Identify as HALT instruction
+                    end
+
+                    else if (ir == 8'h00) begin
+                        // NOP
+                        state <= STATE_FETCH; // Identify as NOP instruction
+                    end
+
+                    else if (ir == 8'h31) begin
+                        // LD SP, nn
+                        alu_op <= ALU_LD_SP; // Identify as LD SP, nn instruction
+                        imm16 <= 1'b1; // Set imm16 to indicate that we need to fetch an 16-bit immediate value
+                        state <= STATE_FETCH_IMM; // Move to fetch immediate state
+                    end
+
+                    else if (ir == 8'hFA) begin
+                        // LD A, (nn)
+                        dst <= REG_A;
+                        imm16 <= 1'b1; // Set imm16 to indicate that we need to fetch a 16-bit immediate value
+                        mem_read_after_imm <= 1'b1; // Set flag to read from memory after fetching immediate value
+                        state <= STATE_FETCH_IMM; // Move to fetch immediate state
+                    end
+
+                    else if (ir == 8'hEA) begin
+                        // LD (nn), A
+                        src <= REG_A;
+                        imm16 <= 1'b1; // Set imm16 to indicate that we need to fetch a 16-bit immediate value
+                        mem_write_after_imm <= 1'b1; // Set flag to write to memory after fetching immediate value
+                        state <= STATE_FETCH_IMM; // Move to fetch immediate state
+                    end
+
+                    else if (ir == 8'hF0) begin
+                        // LDH A, (n)
+                        dst <= REG_A; // Set destination to A
+                        imm16 <= 1'b0; // Set imm16 to indicate that we need to fetch an 8-bit immediate value
+                        mem_read_after_imm <= 1'b1; // Set flag to read from memory after fetching immediate value
+                        state <= STATE_FETCH_IMM; // Move to fetch immediate state
+                    end
+
+                    else if (ir == 8'hE0) begin
+                        // LDH (n), A
+                        src <= REG_A; // Set source to A
+                        imm16 <= 1'b0; // Set imm16 to indicate that we need to fetch an 8-bit immediate value
+                        mem_write_after_imm <= 1'b1; // Set flag to write to memory after fetching immediate value
+                        state <= STATE_FETCH_IMM; // Move to fetch immediate state
+                    end
+
+                    else if (ir == 8'hF9) begin
+                        // LD SP, HL
+                        alu_op <= ALU_LD_SP_HL; // Identify as LD SP, HL instruction
+                        state <= STATE_EXECUTE; // Move to execute state
+                    end
+
+                    else if (ir == 8'h08) begin
+                        // LD (nn), SP
+                        imm16 <= 1'b1; // Set imm16 to indicate that we need to fetch a 16-bit immediate value
+                        mem_write_sp <= 1'b1; // Set flag to write SP to memory after fetching immediate value
+                        state <= STATE_FETCH_IMM; // Move to fetch immediate state
+                    end
+
+                    else if (ir[7:6] == 2'b01) begin
                         dst <= ir[5:3]; // Set destination register
                         src <= ir[2:0]; // Set source register
                         if (ir[2:0] == 3'b110) begin
@@ -498,57 +691,6 @@ module cpu (
                         state <= STATE_STACK_POP; // Move to stack pop state to retrieve return address
                     end
 
-                    else if (ir == 8'hF3) begin
-                        // DI
-                        alu_op <= ALU_DI; // Identify as DI instruction
-                        state <= STATE_EXECUTE;
-                    end
-
-                    else if (ir == 8'hFB) begin
-                        // EI
-                        alu_op <= ALU_EI; // Identify as EI instruction
-                        state <= STATE_EXECUTE;
-                    end
-
-                    else if (ir == 8'hD9) begin
-                        // RETI
-                        alu_op <= ALU_RETI; // Identify as RETI instruction
-                        state <= STATE_STACK_POP;
-                    end
-
-                    else if (ir == 8'h76) begin
-                        // HALT
-                        state <= STATE_HALT; // Identify as HALT instruction
-                    end
-
-                    else if (ir == 8'h00) begin
-                        // NOP
-                        state <= STATE_FETCH; // Identify as NOP instruction
-                    end
-
-                    else if (ir == 8'h31) begin
-                        // LD SP, nn
-                        alu_op <= ALU_LD_SP; // Identify as LD SP, nn instruction
-                        imm16 <= 1'b1; // Set imm16 to indicate that we need to fetch an 16-bit immediate value
-                        state <= STATE_FETCH_IMM; // Move to fetch immediate state
-                    end
-
-                    else if (ir == 8'hFA) begin
-                        // LD A, (nn)
-                        dst <= REG_A;
-                        imm16 <= 1'b1; // Set imm16 to indicate that we need to fetch a 16-bit immediate value
-                        mem_read_after_imm <= 1'b1; // Set flag to read from memory after fetching immediate value
-                        state <= STATE_FETCH_IMM; // Move to fetch immediate state
-                    end
-
-                    else if (ir == 8'hEA) begin
-                        // LD (nn), A
-                        src <= REG_A;
-                        imm16 <= 1'b1; // Set imm16 to indicate that we need to fetch a 16-bit immediate value
-                        mem_write_after_imm <= 1'b1; // Set flag to write to memory after fetching immediate value
-                        state <= STATE_FETCH_IMM; // Move to fetch immediate state
-                    end
-
                     else if (ir[7:6] == 2'b11 && ir [2:0] == 3'b101 && ir[5:3] != 3'b001) begin
                         dst <= ir[5:3]; // Set destination register pair for PUSH instruction
                         case (dst)
@@ -602,22 +744,6 @@ module cpu (
                         end
                     end
 
-                    else if (ir == 8'hF0) begin
-                        // LDH A, (n)
-                        dst <= REG_A; // Set destination to A
-                        imm16 <= 1'b0; // Set imm16 to indicate that we need to fetch an 8-bit immediate value
-                        mem_read_after_imm <= 1'b1; // Set flag to read from memory after fetching immediate value
-                        state <= STATE_FETCH_IMM; // Move to fetch immediate state
-                    end
-
-                    else if (ir == 8'hE0) begin
-                        // LDH (n), A
-                        src <= REG_A; // Set source to A
-                        imm16 <= 1'b0; // Set imm16 to indicate that we need to fetch an 8-bit immediate value
-                        mem_write_after_imm <= 1'b1; // Set flag to write to memory after fetching immediate value
-                        state <= STATE_FETCH_IMM; // Move to fetch immediate state
-                    end
-
                     else if (ir[7:6] == 2'b10 && ir[5:3] == 3'b001) begin
                         // ADC A, r
                         alu_op <= ALU_ADC; // Identify as ADC instruction
@@ -650,76 +776,33 @@ module cpu (
                         end
                     end
 
-                    else if (ir == 8'hC6) begin
-                        // ADD A, n
-                        dst <= 3'b111; // Set destination register to A (Accumulator)
-                        imm16 <= 1'b0; // Set imm16 to indicate that we need to fetch an 8-bit immediate value
-                        alu_imm <= 1'b1; // Set flag to indicate that we need to use an immediate value for ALU operation
-                        alu_op <= ALU_ADD; // Identify as ADD A, n instruction
-                        state <= STATE_FETCH_IMM; // Move to fetch immediate state                        
+                    else if (ir[7:6] == 2'b00 && ir[3:0] == 4'b0001) begin
+                        // LD rr, nn
+                        rp_sel <= ir[5:4]; // Set register pair select for LD rr, nn instruction
+                        alu_op <= ALU_LD_RR_IMM; // Identify as LD rr, nn instruction
+                        imm16 <= 1'b1; // Set imm16 to indicate that we need to fetch a 16-bit immediate value
+                        state <= STATE_FETCH_IMM; // Move to fetch immediate state
                     end
 
-                    else if (ir == 8'hCE) begin
-                        // ADC A, n
-                        dst <= 3'b111; // Set destination register to A (Accumulator)
-                        imm16 <= 1'b0; // Set imm16 to indicate that we need to fetch an 8-bit immediate value
-                        alu_imm <= 1'b1; // Set flag to indicate that we need to use an immediate value for ALU operation
-                        alu_op <= ALU_ADC; // Identify as ADC A, n instruction
-                        state <= STATE_FETCH_IMM; // Move to fetch immediate state                        
+                    else if (ir[7:6] == 2'b00 && ir[3:0] == 4'b0011) begin
+                        // INC rr
+                        rp_sel <= ir[5:4]; // Set register pair select for INC rr instruction
+                        alu_op <= ALU_INC_RR; // Identify as INC rr instruction
+                        state <= STATE_EXECUTE; // Move to execute state
                     end
 
-                    else if (ir == 8'hD6) begin
-                        // SUB A, n
-                        dst <= 3'b111; // Set destination register to A (Accumulator)
-                        imm16 <= 1'b0; // Set imm16 to indicate that we need to fetch an 8-bit immediate value
-                        alu_imm <= 1'b1; // Set flag to indicate that we need to use an immediate value for ALU operation
-                        alu_op <= ALU_SUB; // Identify as SUB A, n instruction
-                        state <= STATE_FETCH_IMM; // Move to fetch immediate state                        
+                    else if (ir[7:6] == 2'b00 && ir[3:0] == 4'b1011) begin
+                        // DEC rr
+                        rp_sel <= ir[5:4]; // Set register pair select for DEC rr instruction
+                        alu_op <= ALU_DEC_RR; // Identify as DEC rr instruction
+                        state <= STATE_EXECUTE; // Move to execute state
                     end
 
-                    else if (ir == 8'hDE) begin
-                        // SBC A, n
-                        dst <= 3'b111; // Set destination register to A (Accumulator)
-                        imm16 <= 1'b0; // Set imm16 to indicate that we need to fetch an 8-bit immediate value
-                        alu_imm <= 1'b1; // Set flag to indicate that we need to use an immediate value for ALU operation
-                        alu_op <= ALU_SBC; // Identify as SBC A, n instruction
-                        state <= STATE_FETCH_IMM; // Move to fetch immediate state                        
-                    end
-
-                    else if (ir == 8'hE6) begin
-                        // AND A, n
-                        dst <= 3'b111; // Set destination register to A (Accumulator)
-                        imm16 <= 1'b0; // Set imm16 to indicate that we need to fetch an 8-bit immediate value
-                        alu_imm <= 1'b1; // Set flag to indicate that we need to use an immediate value for ALU operation
-                        alu_op <= ALU_AND; // Identify as AND A, n instruction
-                        state <= STATE_FETCH_IMM; // Move to fetch immediate state                        
-                    end
-
-                    else if (ir == 8'hEE) begin
-                        // XOR A, n
-                        dst <= 3'b111; // Set destination register to A (Accumulator)
-                        imm16 <= 1'b0; // Set imm16 to indicate that we need to fetch an 8-bit immediate value
-                        alu_imm <= 1'b1; // Set flag to indicate that we need to use an immediate value for ALU operation
-                        alu_op <= ALU_XOR; // Identify as XOR A, n instruction
-                        state <= STATE_FETCH_IMM; // Move to fetch immediate state                        
-                    end
-
-                    else if (ir == 8'hF6) begin
-                        // OR A, n
-                        dst <= 3'b111; // Set destination register to A (Accumulator)
-                        imm16 <= 1'b0; // Set imm16 to indicate that we need to fetch an 8-bit immediate value
-                        alu_imm <= 1'b1; // Set flag to indicate that we need to use an immediate value for ALU operation
-                        alu_op <= ALU_OR; // Identify as OR A, n instruction
-                        state <= STATE_FETCH_IMM; // Move to fetch immediate state                        
-                    end
-
-                    else if (ir == 8'hFE) begin
-                        // CP A, n
-                        dst <= 3'b111; // Set destination register to A (Accumulator)
-                        imm16 <= 1'b0; // Set imm16 to indicate that we need to fetch an 8-bit immediate value
-                        alu_imm <= 1'b1; // Set flag to indicate that we need to use an immediate value for ALU operation
-                        alu_op <= ALU_CP; // Identify as CP A, n instruction
-                        state <= STATE_FETCH_IMM; // Move to fetch immediate state                        
+                    else if (ir[7:6] == 2'b00 && ir[3:0] == 4'b1001) begin
+                        // ADD HL, rr
+                        rp_sel <= ir[5:4]; // Set register pair select for ADD HL, rr instruction
+                        alu_op <= ALU_ADD_HL_RR; // Identify as ADD HL, rr instruction
+                        state <= STATE_EXECUTE; // Move to execute state
                     end
 
                     else begin
@@ -1121,7 +1204,7 @@ module cpu (
                                 end
                                 3'b110: begin
                                     a <= ret_addr[15:8];
-                                    f <= ret_addr[7:0];
+                                    f <= ret_addr[7:0] & 8'hF0; // Ensure lower nibble of F is always 0
                                 end
                             endcase
                             state <= STATE_FETCH;
@@ -1195,6 +1278,55 @@ module cpu (
                             end
                         end
 
+                        ALU_LD_SP_HL: begin
+                            // Handle LD (HL), SP instruction
+                            sp <= {h, l}; // Load Stack Pointer into HL
+                            state <= STATE_FETCH; // Return to fetch state after execution
+                        end
+
+                        ALU_LD_RR_IMM: begin
+                            // Handle LD rr, nn instruction
+                            case (rp_sel)
+                                2'b00: {b, c} <= nn; // Load immediate 16-bit value into BC
+                                2'b01: {d, e} <= nn; // Load immediate 16-bit value into DE
+                                2'b10: {h, l} <= nn; // Load immediate 16-bit value into HL
+                                default: ; // No operation for invalid register pair selection
+                            endcase
+                            state <= STATE_FETCH; // Return to fetch state after execution
+                        end
+
+                        ALU_INC_RR: begin
+                            // Handle INC rr instruction
+                            case (rp_sel)
+                                2'b00: {b, c} <= {b, c} + 1; // Increment BC
+                                2'b01: {d, e} <= {d, e} + 1; // Increment DE
+                                2'b10: {h, l} <= {h, l} + 1; // Increment HL
+                                2'b11: sp <= sp + 1; // Increment SP
+                                default: ; // No operation for invalid register pair selection
+                            endcase
+                            state <= STATE_FETCH; // Return to fetch state after execution
+                        end
+
+                        ALU_DEC_RR: begin
+                            // Handle DEC rr instruction
+                            case (rp_sel)
+                                2'b00: {b, c} <= {b, c} - 1; // Decrement BC
+                                2'b01: {d, e} <= {d, e} - 1; // Decrement DE
+                                2'b10: {h, l} <= {h, l} - 1; // Decrement HL
+                                2'b11: sp <= sp - 1; // Decrement SP
+                                default: ; // No operation for invalid register pair selection
+                            endcase
+                            state <= STATE_FETCH; // Return to fetch state after execution
+                        end
+
+                        ALU_ADD_HL_RR: begin
+                            // Handle ADD HL, rr instruction
+                            f[F_N] <= 1'b0; // Reset Subtract flag for ADD
+                            f[F_H] <= (({1'b0, h, l} & 16'h0FFF) + ({1'b0, get_rp(rp_sel)} & 16'h0FFF) > 16'h0FFF); // Set Half Carry flag if there is a carry from bit 11
+                            {f[F_C], h, l} <= {1'b0, h, l} + {1'b0, get_rp(rp_sel)}; // Set Carry flag and update HL with result
+                            state <= STATE_FETCH; // Return to fetch state after execution
+                        end
+
                         default: state <= STATE_FETCH; // For unimplemented ALU operations, return to fetch
                 
                     endcase
@@ -1246,23 +1378,31 @@ module cpu (
                             we <= 1'b0; // Read operation
                             fetch_ready <= 1'b1; // Indicate fetch is ready
                         end
+                        else if (!mem_wait) begin
+                            mem_wait <= 1'b1; // Indicate that we are waiting for memory read to complete
+                        end
                         else begin
                             ret_addr[7:0] <= data_in; // Read low byte
                             sp <= sp + 1; // Increment SP by 1 after popping low byte
                             fetch_ready <= 1'b0; // Reset fetch ready for next cycle
+                            mem_wait <= 1'b0; // Reset memory wait for next cycle
                             second_stack_fetch <= 1'b1;
                         end
                     end
-                    else if (second_stack_fetch) begin
+                    else begin
                         if(!fetch_ready) begin
                             addr <= sp; // Set address to SP
                             we <= 1'b0; // Read operation
                             fetch_ready <= 1'b1; // Indicate fetch is ready
                         end
+                        else if (!mem_wait) begin
+                            mem_wait <= 1'b1; // Indicate that we are waiting for memory read to complete
+                        end
                         else begin
                             ret_addr[15:8] <= data_in; // Read high byte
                             sp <= sp + 1; // Increment SP by 1 after popping high byte
                             fetch_ready <= 1'b0; // Reset fetch ready for next cycle
+                            mem_wait <= 1'b0; // Reset memory wait for next cycle
                             second_stack_fetch <= 1'b0; // Reset for next pop
                             state <= STATE_EXECUTE;
                         end
@@ -1282,7 +1422,11 @@ module cpu (
                         we <= 1'b0;
                         fetch_ready <= 1'b1;
                     end
-                    else if (fetch_ready) begin
+                    else if (!mem_wait) begin
+                        mem_wait <= 1'b1; // Indicate that we are waiting for memory read to complete
+                    end
+                    else begin
+                        mem_wait <= 1'b0;        // Reset memory wait for next cycle
                         if (!mem_alu_read) begin
                             case (dst)
                                 REG_B:  b <= data_in;
@@ -1316,7 +1460,17 @@ module cpu (
                     else if(fetch_ready) begin
                         we <= 1'b0;
                         fetch_ready <= 1'b0;
-                        state <= STATE_FETCH;
+                        if (mem_write_sp && !sp_write_low_done) begin
+                            sp_write_low_done <= 1'b1; // Indicate that we have written the low byte of SP to memory
+                            mem_addr <= mem_addr + 1; // Increment memory address to write the high byte of SP
+                            mem_data <= sp[15:8]; // Set data to be written from SP high byte
+                            state <= STATE_MEM_WRITE; // Stay in memory write state to write the high byte
+                        end
+                        else begin
+                            mem_write_sp <= 1'b0; // Reset mem_write_sp flag after writing both bytes of SP to memory
+                            sp_write_low_done <= 1'b0; // Reset sp_write_low_done flag for next operation
+                            state <= STATE_FETCH;
+                        end
                     end
                 end
 
