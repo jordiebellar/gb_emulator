@@ -52,36 +52,47 @@ module cpu (
     localparam REG_A  = 3'd7;
 
     // ALU Operation Codes
-    localparam ALU_LD        = 6'b000001; // Load
-    localparam ALU_LD_IMM    = 6'b000010; // Load Immediate
-    localparam ALU_INC       = 6'b000011; // Increment
-    localparam ALU_DEC       = 6'b000100; // Decrement
-    localparam ALU_ADD       = 6'b000101; // Add
-    localparam ALU_SUB       = 6'b000110; // Subtract
-    localparam ALU_AND       = 6'b000111; // AND
-    localparam ALU_XOR       = 6'b001000; // XOR
-    localparam ALU_OR        = 6'b001001; // OR
-    localparam ALU_CP        = 6'b001010; // Compare
-    localparam ALU_JP_IMM    = 6'b001011; // Jump to Immediate Address
-    localparam ALU_JR        = 6'b001100; // Jump Relative
-    localparam ALU_JR_CC     = 6'b001101; // Jump Relative Conditional
-    localparam ALU_CALL      = 6'b001110; // Push to Stack
-    localparam ALU_RET       = 6'b001111; // Pop from Stack
-    localparam ALU_INT       = 6'b010000; // INT
-    localparam ALU_DI        = 6'b010001; // Disable Interrupts
-    localparam ALU_EI        = 6'b010010; // Enable Interrupts
-    localparam ALU_RETI      = 6'b010011; // RETI
-    localparam ALU_LD_SP     = 6'b010100; // Load into stack pointer
-    localparam ALU_PUSH      = 6'b010101; // PUSH register pairs
-    localparam ALU_POP       = 6'b010111; // POP register pair from stack
-    localparam ALU_JP_CC     = 6'b011000; // Conditional absolute jumps
-    localparam ALU_ADC       = 6'b011001; // Add with carry
-    localparam ALU_SBC       = 6'b011010; // Subtract with carry
-    localparam ALU_LD_SP_HL  = 6'b011011; // Load SP into HL
-    localparam ALU_LD_RR_IMM = 6'b011100; // Load register pair from immediate value
-    localparam ALU_INC_RR    = 6'b011101; // Increment register pair
-    localparam ALU_DEC_RR    = 6'b011110; // Decrement register pair
-    localparam ALU_ADD_HL_RR = 6'b011111; // Add register pair to HL
+    localparam ALU_LD          = 6'b000001; // Load
+    localparam ALU_LD_IMM      = 6'b000010; // Load Immediate
+    localparam ALU_INC         = 6'b000011; // Increment
+    localparam ALU_DEC         = 6'b000100; // Decrement
+    localparam ALU_ADD         = 6'b000101; // Add
+    localparam ALU_SUB         = 6'b000110; // Subtract
+    localparam ALU_AND         = 6'b000111; // AND
+    localparam ALU_XOR         = 6'b001000; // XOR
+    localparam ALU_OR          = 6'b001001; // OR
+    localparam ALU_CP          = 6'b001010; // Compare
+    localparam ALU_JP_IMM      = 6'b001011; // Jump to Immediate Address
+    localparam ALU_JR          = 6'b001100; // Jump Relative
+    localparam ALU_JR_CC       = 6'b001101; // Jump Relative Conditional
+    localparam ALU_CALL        = 6'b001110; // Push to Stack
+    localparam ALU_RET         = 6'b001111; // Pop from Stack
+    localparam ALU_INT         = 6'b010000; // INT
+    localparam ALU_DI          = 6'b010001; // Disable Interrupts
+    localparam ALU_EI          = 6'b010010; // Enable Interrupts
+    localparam ALU_RETI        = 6'b010011; // RETI
+    localparam ALU_LD_SP       = 6'b010100; // Load into stack pointer
+    localparam ALU_PUSH        = 6'b010101; // PUSH register pairs
+    localparam ALU_POP         = 6'b010111; // POP register pair from stack
+    localparam ALU_JP_CC       = 6'b011000; // Conditional absolute jumps
+    localparam ALU_ADC         = 6'b011001; // Add with carry
+    localparam ALU_SBC         = 6'b011010; // Subtract with carry
+    localparam ALU_LD_SP_HL    = 6'b011011; // Load SP into HL
+    localparam ALU_LD_RR_IMM   = 6'b011100; // Load register pair from immediate value
+    localparam ALU_INC_RR      = 6'b011101; // Increment register pair
+    localparam ALU_DEC_RR      = 6'b011110; // Decrement register pair
+    localparam ALU_ADD_HL_RR   = 6'b011111; // Add register pair to HL
+    localparam ALU_LD_HL_SP_E8 = 6'b100000; // Load HL with SP + signed immediate value
+    localparam ALU_RLCA        = 6'b100001; // Rotate A left
+    localparam ALU_RRCA        = 6'b100010; // Rotate A right
+    localparam ALU_RLA         = 6'b100011; // Rotate A left through carry
+    localparam ALU_RRA         = 6'b100100; // Rotate A right through carry
+    localparam ALU_CPL         = 6'b100101; // Complement A
+    localparam ALU_SCF         = 6'b100110; // Set Carry Flag
+    localparam ALU_CCF         = 6'b100111; // Complement Carry Flag
+    localparam ALU_RST         = 6'b101000; // Restart
+    localparam ALU_RET_CC      = 6'b101001; // Conditional return
+    localparam ALU_ADD_SP_E8   = 6'b101010; // Add signed immediate to SP
 
     // Registers
     reg [15:0] pc;   // Program Counter
@@ -497,6 +508,34 @@ module cpu (
                         state <= STATE_FETCH_IMM; // Move to fetch immediate state
                     end
 
+                    else if (ir == 8'hF8) begin
+                        // LD HL, SP + e8
+                        alu_op <= ALU_LD_HL_SP_E8; // Identify as LD HL, SP + e8 instruction
+                        imm16 <= 1'b0; // Set imm16 to indicate that we need to fetch an 8-bit immediate value
+                        state <= STATE_FETCH_IMM; // Move to fetch immediate state
+                    end
+
+                    else if (ir == 8'hE2) begin
+                        // LD (C), A
+                        mem_addr <= 16'hFF00 + c; // Set memory address to FF00 + C for write
+                        mem_data <= a; // Set data to be written from A
+                        state <= STATE_MEM_WRITE; // Move to memory write state
+                    end
+
+                    else if (ir == 8'hF2) begin
+                        // LD A, (C)
+                        dst <= REG_A; // Set destination to A
+                        mem_addr <= 16'hFF00 + c; // Set memory address to FF00 + C for read
+                        state <= STATE_MEM_READ; // Move to memory read state
+                    end
+
+                    else if (ir == 8'hE8) begin
+                        // ADD SP, e8
+                        alu_op <= ALU_ADD_SP_E8; // Identify as ADD SP, e8 instruction
+                        imm16 <= 1'b0; // Set imm16 to indicate that we need to fetch an 8-bit immediate value
+                        state <= STATE_FETCH_IMM; // Move to fetch immediate state
+                    end
+
                     else if (ir[7:6] == 2'b01) begin
                         dst <= ir[5:3]; // Set destination register
                         src <= ir[2:0]; // Set source register
@@ -708,7 +747,7 @@ module cpu (
                         state <= STATE_STACK_POP;
                     end
 
-                    else if (ir[7:6] == 2'b11 && ir[2:0] == 3'b010) begin
+                    else if (ir[7:6] == 2'b11 && ir[2:0] == 3'b010 && ir[5] == 1'b0) begin
                         alu_op <= ALU_JP_CC; // Identify as JP conditional instruction
                         imm16 <= 1'b1; // Set imm16 to indicate that we need to fetch an 16-bit immediate value
                         state <= STATE_FETCH_IMM;
@@ -803,6 +842,51 @@ module cpu (
                         rp_sel <= ir[5:4]; // Set register pair select for ADD HL, rr instruction
                         alu_op <= ALU_ADD_HL_RR; // Identify as ADD HL, rr instruction
                         state <= STATE_EXECUTE; // Move to execute state
+                    end
+
+                    else if (ir[7:6] == 2'b00 && ir[2:0] == 3'b111 && ir[5] == 1'b0) begin
+                        // RLCA, RRCA, RLA, RRA
+                        case (ir[4:3])
+                            2'b00: alu_op <= ALU_RLCA; // Identify as RLCA instruction
+                            2'b01: alu_op <= ALU_RRCA; // Identify as RRCA instruction
+                            2'b10: alu_op <= ALU_RLA;  // Identify as RLA instruction
+                            2'b11: alu_op <= ALU_RRA;  // Identify as RRA instruction
+                            default: ;
+                        endcase
+                        state <= STATE_EXECUTE; // Move to execute state
+                    end
+
+                    else if (ir[7:6] == 2'b00 && ir[2:0] == 3'b111 && ir[5] == 1'b1 && ir[4:3] != 2'b00) begin
+                        // CPL, SCF, CCF
+                        case (ir[4:3])
+                            2'b01: alu_op <= ALU_CPL; // Identify as CPL instruction
+                            2'b10: alu_op <= ALU_SCF; // Identify as SCF instruction
+                            2'b11: alu_op <= ALU_CCF; // Identify as CCF instruction
+                            default: ;
+                        endcase
+                        state <= STATE_EXECUTE; // Move to execute state
+                    end
+
+                    else if (ir[7:6] == 2'b11 && ir[2:0] == 3'b111) begin
+                        // RST vector, target = ir[5:3] * 8
+                        ret_addr <= pc; // Store current PC as return address
+                        iv_addr <= {10'b0000000000, ir[5:3], 3'b000}; // Calculate interrupt vector address
+                        alu_op <= ALU_RST; // Identify as RST instruction
+                        state <= STATE_STACK_PUSH; // Move to stack push state to save return address
+                    end
+
+                    else if (ir[7:6] == 2'b11 && ir[2:0] == 3'b000 && ir[5] == 1'b0) begin
+                        // RET NZ/Z/NC/C
+                        alu_op <= ALU_RET_CC; // Identify as RET conditional instruction
+                        if (ir[4:3] == 2'b00 && !f[F_Z] ||
+                            ir[4:3] == 2'b01 && f[F_Z] ||
+                            ir[4:3] == 2'b10 && !f[F_C] ||
+                            ir[4:3] == 2'b11 && f[F_C]) begin
+                            state <= STATE_STACK_POP; // Move to stack pop state to retrieve return address if condition is met
+                        end
+                        else begin
+                            state <= STATE_FETCH; // Return to fetch state if condition is not met
+                        end
                     end
 
                     else begin
@@ -1279,7 +1363,7 @@ module cpu (
                         end
 
                         ALU_LD_SP_HL: begin
-                            // Handle LD (HL), SP instruction
+                            // Handle LD SP, HL instruction
                             sp <= {h, l}; // Load Stack Pointer into HL
                             state <= STATE_FETCH; // Return to fetch state after execution
                         end
@@ -1324,6 +1408,100 @@ module cpu (
                             f[F_N] <= 1'b0; // Reset Subtract flag for ADD
                             f[F_H] <= (({1'b0, h, l} & 16'h0FFF) + ({1'b0, get_rp(rp_sel)} & 16'h0FFF) > 16'h0FFF); // Set Half Carry flag if there is a carry from bit 11
                             {f[F_C], h, l} <= {1'b0, h, l} + {1'b0, get_rp(rp_sel)}; // Set Carry flag and update HL with result
+                            state <= STATE_FETCH; // Return to fetch state after execution
+                        end
+
+                        ALU_LD_HL_SP_E8: begin
+                            // Handle LD HL, SP+e8 instruction
+                            f[F_Z] <= 1'b0; // Reset Zero flag for this operation
+                            f[F_N] <= 1'b0; // Reset Subtract flag for this operation
+                            f[F_H] <= (({1'b0, sp[3:0]} + {1'b0, n[3:0]}) > 5'h0F); // Set Half Carry flag if there is a carry from bit 3
+                            f[F_C] <= (({1'b0, sp[7:0]} + {1'b0, n}) > 9'h0FF); // Set Carry flag if there is a carry from bit 7
+                            {h, l} <= sp + {{8{n[7]}}, n}; // Update HL with result of SP + signed immediate value
+                            state <= STATE_FETCH; // Return to fetch state after execution
+                        end
+
+                        ALU_RLCA: begin
+                            // Handle RLCA instruction
+                            f[F_C] <= a[7]; // Set Carry flag to the value of bit 7 of A
+                            a <= {a[6:0], a[7]}; // Rotate A left, with bit 7 moving to bit 0
+                            f[F_Z] <= 1'b0; // Reset Zero flag for this operation
+                            f[F_N] <= 1'b0; // Reset Subtract flag for this operation
+                            f[F_H] <= 1'b0; // Reset Half Carry flag for this operation
+                            state <= STATE_FETCH; // Return to fetch state after execution
+                        end
+
+                        ALU_RRCA: begin
+                            // Handle RRCA instruction
+                            f[F_C] <= a[0]; // Set Carry flag to the value of bit 0 of A
+                            a <= {a[0], a[7:1]}; // Rotate A right, with bit 0 moving to bit 7
+                            f[F_Z] <= 1'b0; // Reset Zero flag for this operation
+                            f[F_N] <= 1'b0; // Reset Subtract flag for this operation
+                            f[F_H] <= 1'b0; // Reset Half Carry flag for this operation
+                            state <= STATE_FETCH; // Return to fetch state after execution
+                        end
+
+                        ALU_RLA: begin
+                            // Handle RLA instruction
+                            {f[F_C], a} <= {a[7], a[6:0]} + f[F_C]; // Rotate A left through Carry flag
+                            f[F_Z] <= 1'b0; // Reset Zero flag for this operation
+                            f[F_N] <= 1'b0; // Reset Subtract flag for this operation
+                            f[F_H] <= 1'b0; // Reset Half Carry flag for this operation
+                            state <= STATE_FETCH; // Return to fetch state after execution
+                        end
+
+                        ALU_RRA: begin
+                            // Handle RRA instruction
+                            {f[F_C], a} <= {f[F_C], a[7:1]}; // Rotate A right through Carry flag
+                            f[F_Z] <= 1'b0; // Reset Zero flag for this operation
+                            f[F_N] <= 1'b0; // Reset Subtract flag for this operation
+                            f[F_H] <= 1'b0; // Reset Half Carry flag for this operation
+                            state <= STATE_FETCH; // Return to fetch state after execution
+                        end
+
+                        ALU_CPL: begin
+                            // Handle CPL instruction
+                            a <= ~a; // Complement A
+                            f[F_N] <= 1'b1; // Set Subtract flag for CPL
+                            f[F_H] <= 1'b1; // Set Half Carry flag for CPL
+                            state <= STATE_FETCH; // Return to fetch state after execution
+                        end
+
+                        ALU_SCF: begin
+                            // Handle SCF instruction
+                            f[F_C] <= 1'b1; // Set Carry flag
+                            f[F_N] <= 1'b0; // Reset Subtract flag
+                            f[F_H] <= 1'b0; // Reset Half Carry flag
+                            state <= STATE_FETCH; // Return to fetch state after execution
+                        end
+
+                        ALU_CCF: begin
+                            // Handle CCF instruction
+                            f[F_C] <= ~f[F_C]; // Complement Carry flag
+                            f[F_N] <= 1'b0; // Reset Subtract flag
+                            f[F_H] <= 1'b0; // Reset Half Carry flag
+                            state <= STATE_FETCH; // Return to fetch state after execution
+                        end
+
+                        ALU_RST: begin
+                            // Handle RST instruction
+                            pc <= iv_addr; // Set PC to the interrupt vector address
+                            state <= STATE_FETCH; // Return to fetch state after execution
+                        end
+
+                        ALU_RET_CC: begin
+                            // Handle RET cc instruction
+                            pc <= ret_addr; // Set PC to the return address popped from the stack
+                            state <= STATE_FETCH; // Return to fetch state after execution
+                        end
+
+                        ALU_ADD_SP_E8: begin
+                            // Handle ADD SP, e8 instruction
+                            f[F_Z] <= 1'b0; // Reset Zero flag for this operation
+                            f[F_N] <= 1'b0; // Reset Subtract flag for this operation
+                            f[F_H] <= (({1'b0, sp[3:0]} + {1'b0, n[3:0]}) > 5'h0F); // Set Half Carry flag if there is a carry from bit 3
+                            f[F_C] <= (({1'b0, sp[7:0]} + {1'b0, n}) > 9'h0FF); // Set Carry flag if there is a carry from bit 7
+                            sp <= sp + {{8{n[7]}}, n}; // Update SP with result of SP + signed immediate value
                             state <= STATE_FETCH; // Return to fetch state after execution
                         end
 

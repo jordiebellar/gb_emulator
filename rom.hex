@@ -35,8 +35,60 @@ CD 40 00     // CALL 0x0040          (0018-001A)
 2E 34        // LD L, 0x34           (0035-0036)  HL = 0x1234
 F9           // LD SP, HL            (0037)       expect: SP = 0x1234
 
-C3 38 00     // JP 0x0038            (0038-003A)  trap: infinite loop at end of test
+31 FF 00     // LD SP, 0x00FF        (0038-003A)
+F8 01        // LD HL, SP+1          (003B-003C)  expect: HL=0x0100, H=1, C=1
+C3 43 00     // JP 0x0043            (003D-003F)  skip over the CALL 0x0040 subroutine
+             //                       (0040-0042 untouched, still the CALL target)
+@43
+31 FF 00     // LD SP, 0x00FF        (0043-0045)  reset SP for the second case
+F8 FF        // LD HL, SP+(-1)       (0046-0047)  expect: HL=0x00FE, H=1, C=1 (unsigned-add flag quirk)
+
+3E 00        // LD A, 0x00           (0048-0049)
+07           // RLCA                 (004A)       expect: A=0x00, C=0, Z=0 (zero result still clears Z, doesn't set it)
+3E 85        // LD A, 0x85           (004B-004C)
+07           // RLCA                 (004D)       expect: A=0x0B, C=1, Z=0
+3E 03        // LD A, 0x03           (004E-004F)
+0F           // RRCA                 (0050)       expect: A=0x81, C=1, Z=0
+3E FF        // LD A, 0xFF           (0051-0052)
+C6 01        // ADD A, 0x01          (0053-0054)  sets A=0x00, C=1, Z=1, H=1 (ordinary ADD, not rotate)
+17           // RLA                  (0055)       expect: A=0x01 (rotates in old C=1), new C=0, Z=0 (forced despite ADD's Z=1)
+C6 FF        // ADD A, 0xFF          (0056-0057)  sets A=0x00, C=1, Z=1, H=1
+1F           // RRA                  (0058)       expect: A=0x80 (rotates in old C=1), new C=0, Z=0 (forced)
+
+3E 55        // LD A, 0x55           (0059-005A)
+2F           // CPL                  (005B)       expect: A=0xAA, N=1, H=1, Z/C unaffected (carried from RRA: Z=0,C=0)
+
+AF           // XOR A, A             (005C)       A=0x00, Z=1, N=0, H=0, C=0 -- baseline for SCF/CCF
+37           // SCF                  (005D)       expect: C=1, N=0, H=0, Z unchanged=1
+3F           // CCF                  (005E)       expect: C=0 (complemented), N=0, H=0, Z unchanged=1
+
+31 00 D0     // LD SP, 0xD000        (005F-0061)  fresh SP for conditional RET tests
+CD 00 01     // CALL 0x0100          (0062-0064)  taken-RET subroutine (RET NZ, Z=0)
+06 11        // LD B, 0x11           (0065-0066)  marker: reached only if subroutine returned correctly
+CD 10 01     // CALL 0x0110          (0067-0069)  not-taken-then-manual-RET subroutine
+0E 22        // LD C, 0x22           (006A-006B)  marker: reached only after that subroutine truly returns
+
+31 00 D0     // LD SP, 0xD000        (006C-006E)  fresh SP for ADD SP,e8 tests
+E8 10        // ADD SP, 0x10         (006F-0070)  expect: SP=0xD010, H=0, C=0, Z=0
+31 FF 00     // LD SP, 0x00FF        (0071-0073)  SP=0x00FF for negative-immediate case
+E8 FF        // ADD SP, -1           (0074-0075)  expect: SP=0x00FE, H=1, C=1, Z=0 (unsigned-add quirk)
+
+31 00 D0     // LD SP, 0xD000        (0076-0078)  fresh SP in WRAM so pushed RST bytes are inspectable
+DF           // RST 18H              (0079)       LAST check: verify push+jump only, testbench $finish
+             //                       immediately after, never fetches from vector 0x0018 (already
+             //                       consumed by check 6's CALL, static ROM, can't be redefined here)
 
 @40
 3E AB        // LD A, 0xAB           (0040-0041)  marker inside subroutine
 C9           // RET                  (0042)
+
+@100
+3E 01        // LD A, 0x01           (0100-0101)
+B7           // OR A, A              (0102)       sets Z=0 (A=1, nonzero)
+C0           // RET NZ               (0103)       Z=0 -> condition true -> pops and returns
+
+@110
+AF           // XOR A, A             (0110)       A=0, Z=1
+C0           // RET NZ               (0111)       Z=1 -> condition false -> falls through, no stack access
+3E 99        // LD A, 0x99           (0112-0113)  marker proving fallthrough actually happened
+C9           // RET                  (0114)       unconditional return
