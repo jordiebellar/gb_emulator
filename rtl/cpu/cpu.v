@@ -40,6 +40,8 @@ module cpu (
     localparam STATE_HALT = 4'd6; // Halts until interrupt
     localparam STATE_MEM_READ = 4'd7; // Puts address on bus, waits, them reads data_in
     localparam STATE_MEM_WRITE = 4'd8; // Writes to memory address
+    localparam STATE_FETCH_CB = 4'd9; // Fetch CB-prefixed instruction
+    localparam STATE_CB_DECODE = 4'd10; // Decode CB-prefixed instruction
 
     // Register Identifiers
     localparam REG_B  = 3'd0;
@@ -95,6 +97,10 @@ module cpu (
     localparam ALU_ADD_SP_E8   = 6'b101010; // Add signed immediate to SP
     localparam ALU_STOP        = 6'b101011; // Stop
     localparam ALU_DAA         = 6'b101100; // Decimal Adjust A
+    localparam ALU_CB_ROT      = 6'b101101; // CB-prefixed rotate/shift instructions
+    localparam ALU_CB_BIT      = 6'b101110; // CB-prefixed bit instructions
+    localparam ALU_CB_RES      = 6'b101111; // CB-prefixed reset bit instructions
+    localparam ALU_CB_SET      = 6'b110000; // CB-prefixed set bit instructions
 
     // Registers
     reg [15:0] pc;   // Program Counter
@@ -105,6 +111,7 @@ module cpu (
     reg [7:0]  d, e; // DE Register Pair
     reg [7:0]  h, l; // HL Register Pair
     reg [7:0]  ir;   // Instruction Register
+    reg [7:0] cb_ir;  // CB Instruction Register
     reg [15:0] mem_addr; // Memory Address register
     reg [15:0] mem_data; // Holds the value being written
 
@@ -155,6 +162,14 @@ module cpu (
     reg [7:0] correction;
     reg new_c;
     reg [7:0] new_a;
+
+    reg [7:0] cb_operand;
+    always @(dst or mem_alu_read or mem_alu_data or a or b or c or d or e or h or l) begin
+        if (mem_alu_read)
+            cb_operand = mem_alu_data[7:0];
+        else
+            cb_operand = get_reg(dst);
+    end
 
     // Helper function to get register value based on identifier
     function [7:0] get_reg;
@@ -230,6 +245,7 @@ module cpu (
             mem_wait <= 1'b0;
             ime <= 1'b0;
             halt_bug <= 1'b0;
+            cb_ir <= 8'h00;
         end
         else begin           
             // State Machine for Fetch, Decode, Execute
@@ -562,6 +578,11 @@ module cpu (
                         imm16 <= 1'b0; // Set imm16 to indicate that we need to fetch an 8-bit immediate value
                         alu_op <= ALU_STOP; // Identify as STOP instruction
                         state <= STATE_FETCH_IMM; // Move to fetch immediate state
+                    end
+
+                    else if (ir == 8'hCB) begin
+                        // CB-prefixed instruction
+                        state <= STATE_FETCH_CB; // Move to fetch CB-prefixed instruction state
                     end
 
                     else if (ir[7:6] == 2'b01) begin
@@ -1571,6 +1592,258 @@ module cpu (
                             state <= STATE_FETCH; // Return to fetch state after execution
                         end
 
+                        ALU_CB_ROT: begin
+                            case (cb_ir[5:3])
+                                3'b000: begin 
+                                    // RLC
+                                    f[F_C] <= cb_operand[7];
+                                    f[F_Z] <= ({cb_operand[6:0], cb_operand[7]} == 8'h00);
+                                    f[F_N] <= 1'b0;
+                                    f[F_H] <= 1'b0;
+                                    if (mem_alu_read) begin
+                                        addr <= {h, l};
+                                        data_out <= {cb_operand[6:0], cb_operand[7]};
+                                        we <= 1'b1;
+                                    end else begin
+                                        case (dst)
+                                            REG_B: b <= {cb_operand[6:0], cb_operand[7]};
+                                            REG_C: c <= {cb_operand[6:0], cb_operand[7]};
+                                            REG_D: d <= {cb_operand[6:0], cb_operand[7]};
+                                            REG_E: e <= {cb_operand[6:0], cb_operand[7]};
+                                            REG_H: h <= {cb_operand[6:0], cb_operand[7]};
+                                            REG_L: l <= {cb_operand[6:0], cb_operand[7]};
+                                            REG_A: a <= {cb_operand[6:0], cb_operand[7]};
+                                            default: ;
+                                        endcase
+                                    end
+                                end
+                                3'b001: begin 
+                                    // RRC
+                                    f[F_C] <= cb_operand[0];
+                                    f[F_Z] <= ({cb_operand[0], cb_operand[7:1]} == 8'h00);
+                                    f[F_N] <= 1'b0;
+                                    f[F_H] <= 1'b0;
+                                    if (mem_alu_read) begin
+                                        addr <= {h, l};
+                                        data_out <= {cb_operand[0], cb_operand[7:1]};
+                                        we <= 1'b1;
+                                    end else begin
+                                        case (dst)
+                                            REG_B: b <= {cb_operand[0], cb_operand[7:1]};
+                                            REG_C: c <= {cb_operand[0], cb_operand[7:1]};
+                                            REG_D: d <= {cb_operand[0], cb_operand[7:1]};
+                                            REG_E: e <= {cb_operand[0], cb_operand[7:1]};
+                                            REG_H: h <= {cb_operand[0], cb_operand[7:1]};
+                                            REG_L: l <= {cb_operand[0], cb_operand[7:1]};
+                                            REG_A: a <= {cb_operand[0], cb_operand[7:1]};
+                                            default: ;
+                                        endcase
+                                    end
+                                end
+                                3'b010: begin 
+                                    // RL
+                                    f[F_C] <= cb_operand[7];
+                                    f[F_Z] <= ({cb_operand[6:0], f[F_C]} == 8'h00);
+                                    f[F_N] <= 1'b0;
+                                    f[F_H] <= 1'b0;
+                                    if (mem_alu_read) begin
+                                        addr <= {h, l};
+                                        data_out <= {cb_operand[6:0], f[F_C]};
+                                        we <= 1'b1;
+                                    end else begin
+                                        case (dst)
+                                            REG_B: b <= {cb_operand[6:0], f[F_C]};
+                                            REG_C: c <= {cb_operand[6:0], f[F_C]};
+                                            REG_D: d <= {cb_operand[6:0], f[F_C]};
+                                            REG_E: e <= {cb_operand[6:0], f[F_C]};
+                                            REG_H: h <= {cb_operand[6:0], f[F_C]};
+                                            REG_L: l <= {cb_operand[6:0], f[F_C]};
+                                            REG_A: a <= {cb_operand[6:0], f[F_C]};
+                                            default: ;
+                                        endcase
+                                    end
+                                end
+                                3'b011: begin 
+                                    // RR
+                                    f[F_C] <= cb_operand[0];
+                                    f[F_Z] <= ({f[F_C], cb_operand[7:1]} == 8'h00);
+                                    f[F_N] <= 1'b0;
+                                    f[F_H] <= 1'b0;
+                                    if (mem_alu_read) begin
+                                        addr <= {h, l};
+                                        data_out <= {f[F_C], cb_operand[7:1]};
+                                        we <= 1'b1;
+                                    end else begin
+                                        case (dst)
+                                            REG_B: b <= {f[F_C], cb_operand[7:1]};
+                                            REG_C: c <= {f[F_C], cb_operand[7:1]};
+                                            REG_D: d <= {f[F_C], cb_operand[7:1]};
+                                            REG_E: e <= {f[F_C], cb_operand[7:1]};
+                                            REG_H: h <= {f[F_C], cb_operand[7:1]};
+                                            REG_L: l <= {f[F_C], cb_operand[7:1]};
+                                            REG_A: a <= {f[F_C], cb_operand[7:1]};
+                                            default: ;
+                                        endcase
+                                    end
+                                end
+                                3'b100: begin 
+                                    // SLA
+                                    f[F_C] <= cb_operand[7];
+                                    f[F_Z] <= ({cb_operand[6:0], 1'b0} == 8'h00);
+                                    f[F_N] <= 1'b0;
+                                    f[F_H] <= 1'b0;
+                                    if (mem_alu_read) begin
+                                        addr <= {h, l};
+                                        data_out <= {cb_operand[6:0], 1'b0};
+                                        we <= 1'b1;
+                                    end else begin
+                                        case (dst)
+                                            REG_B: b <= {cb_operand[6:0], 1'b0};
+                                            REG_C: c <= {cb_operand[6:0], 1'b0};
+                                            REG_D: d <= {cb_operand[6:0], 1'b0};
+                                            REG_E: e <= {cb_operand[6:0], 1'b0};
+                                            REG_H: h <= {cb_operand[6:0], 1'b0};
+                                            REG_L: l <= {cb_operand[6:0], 1'b0};
+                                            REG_A: a <= {cb_operand[6:0], 1'b0};
+                                            default: ;
+                                        endcase
+                                    end
+                                end
+                                3'b101: begin 
+                                    // SRA 
+                                    f[F_C] <= cb_operand[0];
+                                    f[F_Z] <= ({cb_operand[7], cb_operand[7:1]} == 8'h00);
+                                    f[F_N] <= 1'b0;
+                                    f[F_H] <= 1'b0;
+                                    if (mem_alu_read) begin
+                                        addr <= {h, l};
+                                        data_out <= {cb_operand[7], cb_operand[7:1]};
+                                        we <= 1'b1;
+                                    end else begin
+                                        case (dst)
+                                            REG_B: b <= {cb_operand[7], cb_operand[7:1]};
+                                            REG_C: c <= {cb_operand[7], cb_operand[7:1]};
+                                            REG_D: d <= {cb_operand[7], cb_operand[7:1]};
+                                            REG_E: e <= {cb_operand[7], cb_operand[7:1]};
+                                            REG_H: h <= {cb_operand[7], cb_operand[7:1]};
+                                            REG_L: l <= {cb_operand[7], cb_operand[7:1]};
+                                            REG_A: a <= {cb_operand[7], cb_operand[7:1]};
+                                            default: ;
+                                        endcase
+                                    end
+                                end
+                                3'b110: begin 
+                                    // SWAP
+                                    f[F_C] <= 1'b0;
+                                    f[F_Z] <= ({cb_operand[3:0], cb_operand[7:4]} == 8'h00);
+                                    f[F_N] <= 1'b0;
+                                    f[F_H] <= 1'b0;
+                                    if (mem_alu_read) begin
+                                        addr <= {h, l};
+                                        data_out <= {cb_operand[3:0], cb_operand[7:4]};
+                                        we <= 1'b1;
+                                    end else begin
+                                        case (dst)
+                                            REG_B: b <= {cb_operand[3:0], cb_operand[7:4]};
+                                            REG_C: c <= {cb_operand[3:0], cb_operand[7:4]};
+                                            REG_D: d <= {cb_operand[3:0], cb_operand[7:4]};
+                                            REG_E: e <= {cb_operand[3:0], cb_operand[7:4]};
+                                            REG_H: h <= {cb_operand[3:0], cb_operand[7:4]};
+                                            REG_L: l <= {cb_operand[3:0], cb_operand[7:4]};
+                                            REG_A: a <= {cb_operand[3:0], cb_operand[7:4]};
+                                            default: ;
+                                        endcase
+                                    end
+                                end
+                                3'b111: begin 
+                                    // SRL
+                                    f[F_C] <= cb_operand[0];
+                                    f[F_Z] <= ({1'b0, cb_operand[7:1]} == 8'h00);
+                                    f[F_N] <= 1'b0;
+                                    f[F_H] <= 1'b0;
+                                    if (mem_alu_read) begin
+                                        addr <= {h, l};
+                                        data_out <= {1'b0, cb_operand[7:1]};
+                                        we <= 1'b1;
+                                    end else begin
+                                        case (dst)
+                                            REG_B: b <= {1'b0, cb_operand[7:1]};
+                                            REG_C: c <= {1'b0, cb_operand[7:1]};
+                                            REG_D: d <= {1'b0, cb_operand[7:1]};
+                                            REG_E: e <= {1'b0, cb_operand[7:1]};
+                                            REG_H: h <= {1'b0, cb_operand[7:1]};
+                                            REG_L: l <= {1'b0, cb_operand[7:1]};
+                                            REG_A: a <= {1'b0, cb_operand[7:1]};
+                                            default: ;
+                                        endcase
+                                    end
+                                end
+                            endcase
+                            if (mem_alu_read) begin
+                                mem_alu_read <= 1'b0;
+                                mem_alu_data <= 16'h0000;
+                            end
+                            state <= STATE_FETCH;
+                        end
+
+                        ALU_CB_BIT: begin
+                            // BIT b, r
+                            f[F_Z] <= (cb_operand[cb_ir[5:3]] == 1'b0);
+                            f[F_N] <= 1'b0;
+                            f[F_H] <= 1'b1;
+                            if (mem_alu_read) begin
+                                mem_alu_read <= 1'b0;
+                                mem_alu_data <= 16'h0000;
+                            end
+                            state <= STATE_FETCH;
+                        end
+
+                        ALU_CB_RES: begin
+                            // RES b, r
+                            if (mem_alu_read) begin
+                                addr <= {h, l};
+                                data_out <= cb_operand & ~(8'h01 << cb_ir[5:3]);
+                                we <= 1'b1;
+                                mem_alu_read <= 1'b0;
+                                mem_alu_data <= 16'h0000;
+                            end else begin
+                                case (dst)
+                                    REG_B: b <= cb_operand & ~(8'h01 << cb_ir[5:3]);
+                                    REG_C: c <= cb_operand & ~(8'h01 << cb_ir[5:3]);
+                                    REG_D: d <= cb_operand & ~(8'h01 << cb_ir[5:3]);
+                                    REG_E: e <= cb_operand & ~(8'h01 << cb_ir[5:3]);
+                                    REG_H: h <= cb_operand & ~(8'h01 << cb_ir[5:3]);
+                                    REG_L: l <= cb_operand & ~(8'h01 << cb_ir[5:3]);
+                                    REG_A: a <= cb_operand & ~(8'h01 << cb_ir[5:3]);
+                                    default: ;
+                                endcase
+                            end
+                            state <= STATE_FETCH;
+                        end
+
+                        ALU_CB_SET: begin
+                            // SET b, r
+                            if (mem_alu_read) begin
+                                addr <= {h, l};
+                                data_out <= cb_operand | (8'h01 << cb_ir[5:3]);
+                                we <= 1'b1;
+                                mem_alu_read <= 1'b0;
+                                mem_alu_data <= 16'h0000;
+                            end else begin
+                                case (dst)
+                                    REG_B: b <= cb_operand | (8'h01 << cb_ir[5:3]);
+                                    REG_C: c <= cb_operand | (8'h01 << cb_ir[5:3]);
+                                    REG_D: d <= cb_operand | (8'h01 << cb_ir[5:3]);
+                                    REG_E: e <= cb_operand | (8'h01 << cb_ir[5:3]);
+                                    REG_H: h <= cb_operand | (8'h01 << cb_ir[5:3]);
+                                    REG_L: l <= cb_operand | (8'h01 << cb_ir[5:3]);
+                                    REG_A: a <= cb_operand | (8'h01 << cb_ir[5:3]);
+                                    default: ;
+                                endcase
+                            end
+                            state <= STATE_FETCH;
+                        end
+
 
                         default: state <= STATE_FETCH; // For unimplemented ALU operations, return to fetch
                 
@@ -1716,6 +1989,44 @@ module cpu (
                             sp_write_low_done <= 1'b0; // Reset sp_write_low_done flag for next operation
                             state <= STATE_FETCH;
                         end
+                    end
+                end
+
+                STATE_FETCH_CB: begin
+                    if(!fetch_ready) begin
+                        addr <= pc;
+                        we <= 1'b0;
+                        fetch_ready <= 1'b1;
+                    end
+                    else if (!mem_wait) begin
+                        mem_wait <= 1'b1;
+                    end
+                    else begin
+                        cb_ir <= data_in; // Store the fetched CB instruction
+                        pc <= pc + 1; // Increment PC after fetching the instruction
+                        fetch_ready <= 1'b0; // Reset fetch ready for next cycle
+                        mem_wait <= 1'b0; // Reset memory wait for next cycle
+                        state <= STATE_CB_DECODE; // Transition to CB decode state
+                    end
+                end
+
+                STATE_CB_DECODE: begin
+                    dst <= cb_ir[2:0]; // Extract destination register from CB instruction
+                    src <= cb_ir[2:0]; // Extract source register from CB instruction
+                    case (cb_ir[7:6])
+                        2'b00: alu_op <= ALU_CB_ROT; // Rotate/Shift operations
+                        2'b01: alu_op <= ALU_CB_BIT; // Bit test operations
+                        2'b10: alu_op <= ALU_CB_RES; // Bit reset operations
+                        2'b11: alu_op <= ALU_CB_SET; // Bit set operations
+                    endcase
+                    if (cb_ir[2:0] == 3'b110) begin
+                        // If the destination is (HL), we need to read from memory first
+                        mem_addr <= {h, l}; // Set memory address to HL
+                        mem_alu_read <= 1'b1; // Indicate that we are reading from memory for ALU operation
+                        state <= STATE_MEM_READ; // Transition to memory read state
+                    end
+                    else begin
+                        state <= STATE_EXECUTE; // Transition to execute state for register operations
                     end
                 end
 

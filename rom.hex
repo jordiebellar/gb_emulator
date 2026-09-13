@@ -100,10 +100,20 @@ EA 0F FF     // LD (0xFF0F), A       (0091-0093)  IF=0x01 (IE still 0x01 from wa
 
 10 00        // STOP (+padding)      (0098-0099)  placeholder; exits immediately since IE&IF still nonzero
 
-31 00 D0     // LD SP, 0xD000        (009A-009C)
-DF           // RST 18H              (009D)       LAST check: verify push+jump only, testbench $finish
-             //                       immediately after, never fetches from vector 0x0018 (already
-             //                       consumed by check 6's CALL, static ROM, can't be redefined here)
+06 85        // LD B, 0x85           (009A-009B)
+CB 00        // RLC B                (009C-009D)  expect: B=0x0B, C=1, Z=0
+
+26 C0        // LD H, 0xC0           (009E-009F)
+2E 60        // LD L, 0x60           (00A0-00A1)  HL = 0xC060
+36 FF        // LD (HL), 0xFF        (00A2-00A3)  mem[0xC060] = 0xFF
+CB 86        // RES 0, (HL)          (00A4-00A5)  expect: mem[0xC060] = 0xFE
+
+37           // SCF                  (00A6)       C=1, baseline for BIT test
+06 01        // LD B, 0x01           (00A7-00A8)
+CB 40        // BIT 0, B             (00A9-00AA)  expect: Z=0, H=1, N=0, C=1 (untouched)
+
+31 00 D0     // LD SP, 0xD000        (00AB-00AD)
+DF           // RST 18H              (00AE)       LAST check: return addr = 0x00AF
 
 @40
 3E AB        // LD A, 0xAB           (0040-0041)  marker inside subroutine

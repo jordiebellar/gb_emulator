@@ -38,10 +38,11 @@ module tb_cpu;
     initial begin
         $dumpfile("sim/waves/tb_cpu.vcd");
         $dumpvars(0, tb_cpu);
-        $monitor("t=%0t st=%0d pc=%h ir=%h addr=%h we=%b din=%h dout=%h a=%h b=%h sp=%h",
-            $time, dut.cpu_inst.state, dut.cpu_inst.pc, dut.cpu_inst.ir,
-            dut.cpu_inst.addr, dut.cpu_inst.we, dut.cpu_inst.data_in,
-            dut.cpu_inst.data_out, dut.cpu_inst.a, dut.cpu_inst.b, dut.cpu_inst.sp);
+        $monitor("t=%0t st=%0d pc=%h ir=%h cb_ir=%h dst=%0d alu_op=%h mem_alu_read=%b cb_operand=%h addr=%h we=%b din=%h dout=%h a=%h b=%h c=%h sp=%h",
+        $time, dut.cpu_inst.state, dut.cpu_inst.pc, dut.cpu_inst.ir, dut.cpu_inst.cb_ir,
+        dut.cpu_inst.dst, dut.cpu_inst.alu_op, dut.cpu_inst.mem_alu_read, dut.cpu_inst.cb_operand,
+        dut.cpu_inst.addr, dut.cpu_inst.we, dut.cpu_inst.data_in, dut.cpu_inst.data_out,
+        dut.cpu_inst.a, dut.cpu_inst.b, dut.cpu_inst.c, dut.cpu_inst.sp);
     end
 
     // Global safety net in case something hangs that the per-check
@@ -685,6 +686,40 @@ module tb_cpu;
             $display("PASS: STOP correctly consumed its padding byte, execution continued at 0x009A");
         end
 
+                timeout = 0;
+        while (!(dut.cpu_inst.pc === 16'h009E && dut.cpu_inst.state === TB_STATE_FETCH) && timeout < 500) begin
+            @(posedge clk); timeout = timeout + 1;
+        end
+        if (!(dut.cpu_inst.pc === 16'h009E && dut.cpu_inst.state === TB_STATE_FETCH)) begin
+            $display("FAIL: never settled at 0x009E after RLC B"); errors = errors + 1;
+        end else if (dut.cpu_inst.b !== 8'h0B || dut.cpu_inst.f[4] !== 1'b1 || dut.cpu_inst.f[7] !== 1'b0) begin
+            $display("FAIL: RLC B gave B=0x%h C=%b Z=%b, expected 0x0B C=1 Z=0",
+                dut.cpu_inst.b, dut.cpu_inst.f[4], dut.cpu_inst.f[7]); errors = errors + 1;
+        end else $display("PASS: RLC B correctly gave B=0x0B, C=1, Z=0");
+
+        timeout = 0;
+        while (!(dut.cpu_inst.pc === 16'h00A6 && dut.cpu_inst.state === TB_STATE_FETCH) && timeout < 500) begin
+            @(posedge clk); timeout = timeout + 1;
+        end
+        @(posedge clk); // registered wram write settle, same as earlier INC (HL) checks
+        if (!(dut.cpu_inst.pc === 16'h00A6)) begin
+            $display("FAIL: never settled at 0x00A6 after RES 0,(HL)"); errors = errors + 1;
+        end else if (dut.memory_map_inst.wram[16'h0060] !== 8'hFE) begin
+            $display("FAIL: RES 0,(HL) gave mem[0xC060]=0x%h, expected 0xFE",
+                dut.memory_map_inst.wram[16'h0060]); errors = errors + 1;
+        end else $display("PASS: RES 0,(HL) correctly gave mem[0xC060]=0xFE");
+
+        timeout = 0;
+        while (!(dut.cpu_inst.pc === 16'h00AB && dut.cpu_inst.state === TB_STATE_FETCH) && timeout < 500) begin
+            @(posedge clk); timeout = timeout + 1;
+        end
+        if (!(dut.cpu_inst.pc === 16'h00AB && dut.cpu_inst.state === TB_STATE_FETCH)) begin
+            $display("FAIL: never settled at 0x00AB after BIT 0,B"); errors = errors + 1;
+        end else if (dut.cpu_inst.f[7] !== 1'b0 || dut.cpu_inst.f[5] !== 1'b1 || dut.cpu_inst.f[4] !== 1'b1) begin
+            $display("FAIL: BIT 0,B gave Z=%b H=%b C=%b, expected Z=0 H=1 C=1 (C untouched from SCF)",
+                dut.cpu_inst.f[7], dut.cpu_inst.f[5], dut.cpu_inst.f[4]); errors = errors + 1;
+        end else $display("PASS: BIT 0,B correctly gave Z=0, H=1, C=1 left untouched");
+
         // -----------------------------------------------------------
         // Check 13h: RST 18H, LAST check, same reasoning as before,
         // verifies push+jump only.
@@ -704,8 +739,8 @@ module tb_cpu;
         end else if (dut.memory_map_inst.wram[16'h0FFF] !== 8'h00) begin
             $display("FAIL: RST 18H pushed high byte 0x%h at 0xCFFF, expected 0x00", dut.memory_map_inst.wram[16'h0FFF]);
             errors = errors + 1;
-        end else if (dut.memory_map_inst.wram[16'h0FFE] !== 8'h9E) begin
-            $display("FAIL: RST 18H pushed low byte 0x%h at 0xCFFE, expected 0x9E (return addr 0x009E)",
+        end else if (dut.memory_map_inst.wram[16'h0FFE] !== 8'hAF) begin
+            $display("FAIL: RST 18H pushed low byte 0x%h at 0xCFFE, expected 0xAF (return addr 0x00AF)",
                 dut.memory_map_inst.wram[16'h0FFE]);
             errors = errors + 1;
         end else begin
