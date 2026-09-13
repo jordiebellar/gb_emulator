@@ -47,8 +47,8 @@ module tb_cpu;
     // Global safety net in case something hangs that the per-check
     // timeouts below don't catch.
     initial begin
-        #100000;
-        $display("WATCHDOG: simulation ran 100000ns without finishing. Aborting.");
+        #1000000;
+        $display("WATCHDOG: simulation ran 1000000ns without finishing. Aborting.");
         $finish;
     end
 
@@ -545,16 +545,149 @@ module tb_cpu;
             $display("PASS: ADD SP,-1 correctly gave SP=0x00FE, H=1, C=1 despite subtraction, Z=0");
         end
 
+                // -----------------------------------------------------------
+        // Check 13a: DAA after ADD, 0x06 correction only
         // -----------------------------------------------------------
-        // Check 12g: RST 18H (0xDF) -- LAST check. Verifies the push
-        // (correct return address, correct byte order, SP decremented
-        // twice) and the jump to the vector, nothing more. Ends the
-        // simulation immediately after, since every RST vector address
-        // is already permanently defined by earlier checks' real
-        // program bytes (a static $readmemh array can't hold two
-        // different values at the same address for different points
-        // in program-counter time), so nothing meaningful is at 0x0018
-        // to actually execute.
+        timeout = 0;
+        while (!(dut.cpu_inst.pc === 16'h007B && dut.cpu_inst.state === TB_STATE_FETCH) && timeout < 500) begin
+            @(posedge clk);
+            timeout = timeout + 1;
+        end
+        if (!(dut.cpu_inst.pc === 16'h007B && dut.cpu_inst.state === TB_STATE_FETCH)) begin
+            $display("FAIL: CPU never settled at pc=0x007B/FETCH after DAA#1 (pc=%h, st=%0d, timeout)",
+                dut.cpu_inst.pc, dut.cpu_inst.state);
+            errors = errors + 1;
+        end else if (dut.cpu_inst.a !== 8'h83 || dut.cpu_inst.f[4] !== 1'b0 || dut.cpu_inst.f[5] !== 1'b0
+                     || dut.cpu_inst.f[7] !== 1'b0 || dut.cpu_inst.f[6] !== 1'b0) begin
+            $display("FAIL: DAA#1 (0x45+0x38) gave A=0x%h C=%b H=%b Z=%b N=%b, expected A=0x83 C=0 H=0 Z=0 N=0",
+                dut.cpu_inst.a, dut.cpu_inst.f[4], dut.cpu_inst.f[5], dut.cpu_inst.f[7], dut.cpu_inst.f[6]);
+            errors = errors + 1;
+        end else begin
+            $display("PASS: DAA#1 correctly gave A=0x83 (BCD 45+38), C=0, H=0");
+        end
+
+        // -----------------------------------------------------------
+        // Check 13b: DAA after ADD, 0x60 correction only
+        // -----------------------------------------------------------
+        timeout = 0;
+        while (!(dut.cpu_inst.pc === 16'h0080 && dut.cpu_inst.state === TB_STATE_FETCH) && timeout < 500) begin
+            @(posedge clk);
+            timeout = timeout + 1;
+        end
+        if (!(dut.cpu_inst.pc === 16'h0080 && dut.cpu_inst.state === TB_STATE_FETCH)) begin
+            $display("FAIL: CPU never settled at pc=0x0080/FETCH after DAA#2 (pc=%h, st=%0d, timeout)",
+                dut.cpu_inst.pc, dut.cpu_inst.state);
+            errors = errors + 1;
+        end else if (dut.cpu_inst.a !== 8'h80 || dut.cpu_inst.f[4] !== 1'b1 || dut.cpu_inst.f[5] !== 1'b0) begin
+            $display("FAIL: DAA#2 (0x90+0x90) gave A=0x%h C=%b H=%b, expected A=0x80 C=1 H=0",
+                dut.cpu_inst.a, dut.cpu_inst.f[4], dut.cpu_inst.f[5]);
+            errors = errors + 1;
+        end else begin
+            $display("PASS: DAA#2 correctly gave A=0x80 (BCD 90+90=180, C=1 carries the hundreds)");
+        end
+
+        // -----------------------------------------------------------
+        // Check 13c: DAA after ADD, both corrections
+        // -----------------------------------------------------------
+        timeout = 0;
+        while (!(dut.cpu_inst.pc === 16'h0085 && dut.cpu_inst.state === TB_STATE_FETCH) && timeout < 500) begin
+            @(posedge clk);
+            timeout = timeout + 1;
+        end
+        if (!(dut.cpu_inst.pc === 16'h0085 && dut.cpu_inst.state === TB_STATE_FETCH)) begin
+            $display("FAIL: CPU never settled at pc=0x0085/FETCH after DAA#3 (pc=%h, st=%0d, timeout)",
+                dut.cpu_inst.pc, dut.cpu_inst.state);
+            errors = errors + 1;
+        end else if (dut.cpu_inst.a !== 8'h98 || dut.cpu_inst.f[4] !== 1'b1 || dut.cpu_inst.f[5] !== 1'b0) begin
+            $display("FAIL: DAA#3 (0x99+0x99) gave A=0x%h C=%b H=%b, expected A=0x98 C=1 H=0",
+                dut.cpu_inst.a, dut.cpu_inst.f[4], dut.cpu_inst.f[5]);
+            errors = errors + 1;
+        end else begin
+            $display("PASS: DAA#3 correctly gave A=0x98 (BCD 99+99=198), both corrections applied");
+        end
+
+        // -----------------------------------------------------------
+        // Check 13d: DAA after SUB, 0x06 correction only
+        // -----------------------------------------------------------
+        timeout = 0;
+        while (!(dut.cpu_inst.pc === 16'h008A && dut.cpu_inst.state === TB_STATE_FETCH) && timeout < 500) begin
+            @(posedge clk);
+            timeout = timeout + 1;
+        end
+        if (!(dut.cpu_inst.pc === 16'h008A && dut.cpu_inst.state === TB_STATE_FETCH)) begin
+            $display("FAIL: CPU never settled at pc=0x008A/FETCH after DAA#4 (pc=%h, st=%0d, timeout)",
+                dut.cpu_inst.pc, dut.cpu_inst.state);
+            errors = errors + 1;
+        end else if (dut.cpu_inst.a !== 8'h25 || dut.cpu_inst.f[4] !== 1'b0 || dut.cpu_inst.f[5] !== 1'b0
+                     || dut.cpu_inst.f[6] !== 1'b1) begin
+            $display("FAIL: DAA#4 (0x50-0x25) gave A=0x%h C=%b H=%b N=%b, expected A=0x25 C=0 H=0 N=1",
+                dut.cpu_inst.a, dut.cpu_inst.f[4], dut.cpu_inst.f[5], dut.cpu_inst.f[6]);
+            errors = errors + 1;
+        end else begin
+            $display("PASS: DAA#4 correctly gave A=0x25 (BCD 50-25), N left set at 1");
+        end
+
+        // -----------------------------------------------------------
+        // Check 13e: DAA after SUB, both corrections (borrow across tens)
+        // -----------------------------------------------------------
+        timeout = 0;
+        while (!(dut.cpu_inst.pc === 16'h008F && dut.cpu_inst.state === TB_STATE_FETCH) && timeout < 500) begin
+            @(posedge clk);
+            timeout = timeout + 1;
+        end
+        if (!(dut.cpu_inst.pc === 16'h008F && dut.cpu_inst.state === TB_STATE_FETCH)) begin
+            $display("FAIL: CPU never settled at pc=0x008F/FETCH after DAA#5 (pc=%h, st=%0d, timeout)",
+                dut.cpu_inst.pc, dut.cpu_inst.state);
+            errors = errors + 1;
+        end else if (dut.cpu_inst.a !== 8'h99 || dut.cpu_inst.f[4] !== 1'b1 || dut.cpu_inst.f[5] !== 1'b0) begin
+            $display("FAIL: DAA#5 (0x00-0x01) gave A=0x%h C=%b H=%b, expected A=0x99 C=1 H=0",
+                dut.cpu_inst.a, dut.cpu_inst.f[4], dut.cpu_inst.f[5]);
+            errors = errors + 1;
+        end else begin
+            $display("PASS: DAA#5 correctly gave A=0x99 (BCD 00-01 borrows to 99), C=1");
+        end
+
+        // -----------------------------------------------------------
+        // Check 13f: HALT bug. IME=0 with IE&IF already nonzero at the
+        // moment HALT executes means it does NOT halt, and the byte
+        // immediately after HALT (INC B) executes twice.
+        // -----------------------------------------------------------
+        timeout = 0;
+        while (!(dut.cpu_inst.pc === 16'h0098 && dut.cpu_inst.state === TB_STATE_FETCH) && timeout < 500) begin
+            @(posedge clk);
+            timeout = timeout + 1;
+        end
+        if (!(dut.cpu_inst.pc === 16'h0098 && dut.cpu_inst.state === TB_STATE_FETCH)) begin
+            $display("FAIL: CPU never settled at pc=0x0098/FETCH after HALT-bug INC B (pc=%h, st=%0d, timeout)",
+                dut.cpu_inst.pc, dut.cpu_inst.state);
+            errors = errors + 1;
+        end else if (dut.cpu_inst.b !== 8'h02) begin
+            $display("FAIL: HALT bug gave B=0x%h, expected 0x02 (INC B executed twice)", dut.cpu_inst.b);
+            errors = errors + 1;
+        end else begin
+            $display("PASS: HALT bug correctly caused INC B to execute twice, B=0x02");
+        end
+
+        // -----------------------------------------------------------
+        // Check 13g: STOP placeholder correctly consumes its padding
+        // byte and doesn't corrupt the instruction stream.
+        // -----------------------------------------------------------
+        timeout = 0;
+        while (!(dut.cpu_inst.pc === 16'h009A && dut.cpu_inst.state === TB_STATE_FETCH) && timeout < 500) begin
+            @(posedge clk);
+            timeout = timeout + 1;
+        end
+        if (!(dut.cpu_inst.pc === 16'h009A && dut.cpu_inst.state === TB_STATE_FETCH)) begin
+            $display("FAIL: CPU never settled at pc=0x009A/FETCH after STOP (pc=%h, st=%0d, timeout)",
+                dut.cpu_inst.pc, dut.cpu_inst.state);
+            errors = errors + 1;
+        end else begin
+            $display("PASS: STOP correctly consumed its padding byte, execution continued at 0x009A");
+        end
+
+        // -----------------------------------------------------------
+        // Check 13h: RST 18H, LAST check, same reasoning as before,
+        // verifies push+jump only.
         // -----------------------------------------------------------
         timeout = 0;
         while (!(dut.cpu_inst.pc === 16'h0018 && dut.cpu_inst.state === TB_STATE_FETCH) && timeout < 500) begin
@@ -566,18 +699,17 @@ module tb_cpu;
                 dut.cpu_inst.pc, dut.cpu_inst.state);
             errors = errors + 1;
         end else if (dut.cpu_inst.sp !== 16'hCFFE) begin
-            $display("FAIL: RST 18H left SP=0x%h, expected 0xCFFE (two pushes from 0xD000)", dut.cpu_inst.sp);
+            $display("FAIL: RST 18H left SP=0x%h, expected 0xCFFE", dut.cpu_inst.sp);
             errors = errors + 1;
         end else if (dut.memory_map_inst.wram[16'h0FFF] !== 8'h00) begin
-            $display("FAIL: RST 18H pushed high byte 0x%h at 0xCFFF, expected 0x00 (return addr 0x007A)",
-                dut.memory_map_inst.wram[16'h0FFF]);
+            $display("FAIL: RST 18H pushed high byte 0x%h at 0xCFFF, expected 0x00", dut.memory_map_inst.wram[16'h0FFF]);
             errors = errors + 1;
-        end else if (dut.memory_map_inst.wram[16'h0FFE] !== 8'h7A) begin
-            $display("FAIL: RST 18H pushed low byte 0x%h at 0xCFFE, expected 0x7A (return addr 0x007A)",
+        end else if (dut.memory_map_inst.wram[16'h0FFE] !== 8'h9E) begin
+            $display("FAIL: RST 18H pushed low byte 0x%h at 0xCFFE, expected 0x9E (return addr 0x009E)",
                 dut.memory_map_inst.wram[16'h0FFE]);
             errors = errors + 1;
         end else begin
-            $display("PASS: RST 18H correctly pushed return address 0x007A and jumped to vector 0x0018");
+            $display("PASS: RST 18H correctly pushed return address 0x009E and jumped to vector 0x0018");
         end
 
         if (errors == 0)

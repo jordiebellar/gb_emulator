@@ -94,6 +94,7 @@ module cpu (
     localparam ALU_RET_CC      = 6'b101001; // Conditional return
     localparam ALU_ADD_SP_E8   = 6'b101010; // Add signed immediate to SP
     localparam ALU_STOP        = 6'b101011; // Stop
+    localparam ALU_DAA         = 6'b101100; // Decimal Adjust A
 
     // Registers
     reg [15:0] pc;   // Program Counter
@@ -149,6 +150,11 @@ module cpu (
     reg ime; // Interrupt Master Enable
     reg [15:0] iv_addr; // Interrupt vector address
     reg ime_pending; // Delayed IME enable for EI instruction
+
+    // DAA Regs 
+    reg [7:0] correction;
+    reg new_c;
+    reg [7:0] new_a;
 
     // Helper function to get register value based on identifier
     function [7:0] get_reg;
@@ -911,6 +917,12 @@ module cpu (
                         end
                     end
 
+                    else if (ir[7:6] == 2'b00 && ir[2:0] == 3'b111 && ir[5] == 1'b1 && ir[4:3] == 2'b00) begin
+                        // DAA
+                        alu_op <= ALU_DAA; // Identify as DAA instruction
+                        state <= STATE_EXECUTE; // Move to execute state
+                    end
+
                     else begin
                         state <= STATE_FETCH;
                     end
@@ -1531,6 +1543,34 @@ module cpu (
                             // PLACEHOLDER
                             state <= STATE_HALT; // Transition to HALT state
                         end
+
+                        ALU_DAA: begin
+                            // Handle DAA instruction
+                            correction = 8'h00;
+                            new_c = f[F_C];
+
+                            // Determine the correction value based on the current flags and accumulator value
+                            if (f[F_H] || (!f[F_N] && (a[3:0] > 4'h9))) begin
+                                correction = correction + 8'h06;
+                            end
+                            if (f[F_C] || (!f[F_N] && (a > 8'h99))) begin
+                                correction = correction + 8'h60;
+                                new_c = 1'b1; // Set Carry flag if correction is applied
+                            end
+
+                            if (f[F_N]) begin
+                                new_a = a - correction; // Subtract correction if previous operation was subtraction
+                            end else begin
+                                new_a = a + correction; // Add correction if previous operation was addition
+                            end
+
+                            a <= new_a; // Update Accumulator with corrected value
+                            f[F_Z] <= (new_a == 8'h00); // Set Zero flag if result is zero
+                            f[F_H] <= 1'b0; // Reset Half Carry flag after DAA operation
+                            f[F_C] <= new_c; // Update Carry flag based on correction
+                            state <= STATE_FETCH; // Return to fetch state after execution
+                        end
+
 
                         default: state <= STATE_FETCH; // For unimplemented ALU operations, return to fetch
                 
