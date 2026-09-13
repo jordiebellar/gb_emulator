@@ -1,0 +1,131 @@
+3E 01        // LD A, 0x01           (0000-0001)
+EA FF FF     // LD (0xFFFF), A       (0002-0004)  IE = 0x01
+76           // HALT                 (0005)       expect: stall (IE=1, IF=0)
+
+3E 00        // LD A, 0x00           (0006-0007)
+EA 0F FF     // LD (0xFF0F), A       (0008-000A)  IF = 0x00
+
+26 C0        // LD H, 0xC0           (000B-000C)
+2E 50        // LD L, 0x50           (000D-000E)  HL = 0xC050
+36 05        // LD (HL), 0x05        (000F-0010)  mem[0xC050] = 0x05
+3E 10        // LD A, 0x10           (0011-0012)
+86           // ADD A, (HL)          (0013)       expect: A = 0x15
+
+34           // INC (HL)             (0014)       expect: mem[0xC050] = 0x06
+
+31 00 D0     // LD SP, 0xD000        (0015-0017)  SP into WRAM (HRAM not yet mapped)
+CD 40 00     // CALL 0x0040          (0018-001A)
+06 CD        // LD B, 0xCD           (001B-001C)  only reached if RET returned correctly
+
+01 33 22     // LD BC, 0x2233        (001D-001F)
+11 55 44     // LD DE, 0x4455        (0020-0022)
+03           // INC BC               (0023)       expect: BC = 0x2234
+1B           // DEC DE               (0024)       expect: DE = 0x4454
+
+26 FF        // LD H, 0xFF           (0025-0026)
+2E FF        // LD L, 0xFF           (0027-0028)  HL = 0xFFFF
+01 01 00     // LD BC, 0x0001        (0029-002B)  reusing BC for this operand
+09           // ADD HL, BC           (002C)       expect: HL=0x0000, H=1, C=1
+31 BC 9A     // LD SP, 0x9ABC        (002D-002F)
+08 00 C1     // LD (0xC100), SP      (0030-0032)  expect: mem[C100]=0xBC, mem[C101]=0x9A
+
+26 12        // LD H, 0x12           (0033-0034)
+2E 34        // LD L, 0x34           (0035-0036)  HL = 0x1234
+F9           // LD SP, HL            (0037)       expect: SP = 0x1234
+
+31 FF 00     // LD SP, 0x00FF        (0038-003A)
+F8 01        // LD HL, SP+1          (003B-003C)  expect: HL=0x0100, H=1, C=1
+C3 43 00     // JP 0x0043            (003D-003F)  skip over the CALL 0x0040 subroutine
+             //                       (0040-0042 untouched, still the CALL target)
+
+@43
+31 FF 00     // LD SP, 0x00FF        (0043-0045)  reset SP for the second case
+F8 FF        // LD HL, SP+(-1)       (0046-0047)  expect: HL=0x00FE, H=1, C=1 (unsigned-add flag quirk)
+
+3E 00        // LD A, 0x00           (0048-0049)
+07           // RLCA                 (004A)       expect: A=0x00, C=0, Z=0 (zero result still clears Z)
+3E 85        // LD A, 0x85           (004B-004C)
+07           // RLCA                 (004D)       expect: A=0x0B, C=1, Z=0
+3E 03        // LD A, 0x03           (004E-004F)
+0F           // RRCA                 (0050)       expect: A=0x81, C=1, Z=0
+3E FF        // LD A, 0xFF           (0051-0052)
+C6 01        // ADD A, 0x01          (0053-0054)  sets A=0x00, C=1, Z=1, H=1
+17           // RLA                  (0055)       expect: A=0x01 (old carry-in), new C=0, Z=0
+C6 FF        // ADD A, 0xFF          (0056-0057)  sets A=0x00, C=1, Z=1, H=1
+1F           // RRA                  (0058)       expect: A=0x80 (old carry-in), new C=0, Z=0
+
+3E 55        // LD A, 0x55           (0059-005A)
+2F           // CPL                  (005B)       expect: A=0xAA, N=1, H=1, Z/C unaffected (0,0 from RRA)
+
+AF           // XOR A, A             (005C)       A=0x00, Z=1, N=0, H=0, C=0 -- baseline for SCF/CCF
+37           // SCF                  (005D)       expect: C=1, N=0, H=0, Z unchanged=1
+3F           // CCF                  (005E)       expect: C=0 (complemented), N=0, H=0, Z unchanged=1
+
+31 00 D0     // LD SP, 0xD000        (005F-0061)  fresh SP for conditional RET tests
+CD 00 01     // CALL 0x0100          (0062-0064)  taken-RET subroutine (RET NZ, Z=0)
+06 11        // LD B, 0x11           (0065-0066)  marker: reached only if subroutine returned correctly
+CD 10 01     // CALL 0x0110          (0067-0069)  not-taken-then-manual-RET subroutine
+0E 22        // LD C, 0x22           (006A-006B)  marker: reached only after that subroutine truly returns
+
+31 00 D0     // LD SP, 0xD000        (006C-006E)  fresh SP for ADD SP,e8 tests
+E8 10        // ADD SP, 0x10         (006F-0070)  expect: SP=0xD010, H=0, C=0, Z=0
+31 FF 00     // LD SP, 0x00FF        (0071-0073)  SP=0x00FF for negative-immediate case
+E8 FF        // ADD SP, -1           (0074-0075)  expect: SP=0x00FE, H=1, C=1, Z=0 (unsigned-add quirk)
+
+3E 45        // LD A, 0x45           (0076-0077)
+C6 38        // ADD A, 0x38          (0078-0079)  raw: A=0x7D, C=0, H=0
+27           // DAA                  (007A)       expect: A=0x83, C=0, H=0, Z=0, N=0 (0x06 correction only)
+
+3E 90        // LD A, 0x90           (007B-007C)
+C6 90        // ADD A, 0x90          (007D-007E)  raw: A=0x20, C=1, H=0
+27           // DAA                  (007F)       expect: A=0x80, C=1, H=0, Z=0, N=0 (0x60 correction only)
+
+3E 99        // LD A, 0x99           (0080-0081)
+C6 99        // ADD A, 0x99          (0082-0083)  raw: A=0x32, C=1, H=1
+27           // DAA                  (0084)       expect: A=0x98, C=1, H=0, Z=0, N=0 (both corrections)
+
+3E 50        // LD A, 0x50           (0085-0086)
+D6 25        // SUB A, 0x25          (0087-0088)  raw: A=0x2B, C=0, H=1
+27           // DAA                  (0089)       expect: A=0x25, C=0, H=0, Z=0, N=1 (0x06 correction only)
+
+3E 00        // LD A, 0x00           (008A-008B)
+D6 01        // SUB A, 0x01          (008C-008D)  raw: A=0xFF, C=1, H=1
+27           // DAA                  (008E)       expect: A=0x99, C=1, H=0, Z=0, N=1 (both, borrow across tens)
+
+3E 01        // LD A, 0x01           (008F-0090)
+EA 0F FF     // LD (0xFF0F), A       (0091-0093)  IF=0x01 (IE still 0x01 from way back, IME still 0)
+06 00        // LD B, 0x00           (0094-0095)  reset B for a clean measurement
+76           // HALT                 (0096)       IME=0, IE&IF nonzero -> HALT bug triggers
+04           // INC B                (0097)       expect: this byte executes TWICE -> B=0x02
+
+10 00        // STOP (+padding)      (0098-0099)  placeholder; exits immediately since IE&IF still nonzero
+
+06 85        // LD B, 0x85           (009A-009B)
+CB 00        // RLC B                (009C-009D)  expect: B=0x0B, C=1, Z=0
+
+26 C0        // LD H, 0xC0           (009E-009F)
+2E 60        // LD L, 0x60           (00A0-00A1)  HL = 0xC060
+36 FF        // LD (HL), 0xFF        (00A2-00A3)  mem[0xC060] = 0xFF
+CB 86        // RES 0, (HL)          (00A4-00A5)  expect: mem[0xC060] = 0xFE
+
+37           // SCF                  (00A6)       C=1, baseline for BIT test
+06 01        // LD B, 0x01           (00A7-00A8)
+CB 40        // BIT 0, B             (00A9-00AA)  expect: Z=0, H=1, N=0, C=1 (untouched)
+
+31 00 D0     // LD SP, 0xD000        (00AB-00AD)
+DF           // RST 18H              (00AE)       LAST check: return addr = 0x00AF
+
+@40
+3E AB        // LD A, 0xAB           (0040-0041)  marker inside subroutine
+C9           // RET                  (0042)
+
+@100
+3E 01        // LD A, 0x01           (0100-0101)
+B7           // OR A, A              (0102)       sets Z=0 (A=1, nonzero)
+C0           // RET NZ               (0103)       Z=0 -> condition true -> pops and returns
+
+@110
+AF           // XOR A, A             (0110)       A=0, Z=1
+C0           // RET NZ               (0111)       Z=1 -> condition false -> falls through, no stack access
+3E 99        // LD A, 0x99           (0112-0113)  marker proving fallthrough actually happened
+C9           // RET                  (0114)       unconditional return
