@@ -93,6 +93,7 @@ module cpu (
     localparam ALU_RST         = 6'b101000; // Restart
     localparam ALU_RET_CC      = 6'b101001; // Conditional return
     localparam ALU_ADD_SP_E8   = 6'b101010; // Add signed immediate to SP
+    localparam ALU_STOP        = 6'b101011; // Stop
 
     // Registers
     reg [15:0] pc;   // Program Counter
@@ -115,6 +116,7 @@ module cpu (
     reg second_fetch;
     reg imm16;
     reg alu_imm; // Immediate value for ALU operations
+    reg halt_bug; // Flag to indicate that the HALT bug is active
 
     // For Memory Read/Write
     reg mem_read_after_imm; // Flag to indicate that we need to read from memory after fetching immediate value
@@ -221,6 +223,7 @@ module cpu (
             alu_imm <= 1'b0;
             mem_wait <= 1'b0;
             ime <= 1'b0;
+            halt_bug <= 1'b0;
         end
         else begin           
             // State Machine for Fetch, Decode, Execute
@@ -270,7 +273,12 @@ module cpu (
                         end
                         else begin
                             ir <= data_in;         // Load fetched instruction into IR
-                            pc <= pc + 1;          // Increment PC to point to next instruction
+                            if (halt_bug) begin
+                                halt_bug <= 1'b0; // Clear halt_bug flag
+                            end
+                            else begin
+                                pc <= pc + 1;          // Increment PC to point to next instruction
+                            end
                             fetch_ready <= 1'b0;   // Reset fetch ready for next cycle
                             mem_wait <= 1'b0;        // Reset memory wait for next cycle
                             state <= STATE_DECODE; // Move to decode state
@@ -447,8 +455,14 @@ module cpu (
 
                     else if (ir == 8'h76) begin
                         // HALT
-                        // Need to implement bug where HALT does not work if IME is disabled and no interrupts are pending
-                        state <= STATE_HALT; // Identify as HALT instruction
+                        if (!ime && (ie & if_reg) != 8'h00) begin
+                            // If interrupts are disabled and an interrupt is pending, enter HALT bug state
+                            halt_bug <= 1'b1; // Set halt_bug flag to indicate that the HALT bug is active
+                            state <= STATE_FETCH; // Return to fetch state to execute the next instruction
+                        end
+                        else begin
+                            state <= STATE_HALT; // Enter HALT state, waiting for an interrupt to occur
+                        end
                     end
 
                     else if (ir == 8'h00) begin
@@ -533,6 +547,14 @@ module cpu (
                         // ADD SP, e8
                         alu_op <= ALU_ADD_SP_E8; // Identify as ADD SP, e8 instruction
                         imm16 <= 1'b0; // Set imm16 to indicate that we need to fetch an 8-bit immediate value
+                        state <= STATE_FETCH_IMM; // Move to fetch immediate state
+                    end
+
+                    else if (ir == 8'h10) begin
+                        // STOP
+                        // TODO: Implement STOP instruction handling
+                        imm16 <= 1'b0; // Set imm16 to indicate that we need to fetch an 8-bit immediate value
+                        alu_op <= ALU_STOP; // Identify as STOP instruction
                         state <= STATE_FETCH_IMM; // Move to fetch immediate state
                     end
 
@@ -1503,6 +1525,11 @@ module cpu (
                             f[F_C] <= (({1'b0, sp[7:0]} + {1'b0, n}) > 9'h0FF); // Set Carry flag if there is a carry from bit 7
                             sp <= sp + {{8{n[7]}}, n}; // Update SP with result of SP + signed immediate value
                             state <= STATE_FETCH; // Return to fetch state after execution
+                        end
+
+                        ALU_STOP: begin
+                            // PLACEHOLDER
+                            state <= STATE_HALT; // Transition to HALT state
                         end
 
                         default: state <= STATE_FETCH; // For unimplemented ALU operations, return to fetch
