@@ -163,7 +163,9 @@ module cpu (
     reg new_c;
     reg [7:0] new_a;
 
+    // CB Instruction Operand
     reg [7:0] cb_operand;
+    // Determine the operand for CB instructions based on whether it's a memory read or a register read
     always @(dst or mem_alu_read or mem_alu_data or a or b or c or d or e or h or l) begin
         if (mem_alu_read)
             cb_operand = mem_alu_data[7:0];
