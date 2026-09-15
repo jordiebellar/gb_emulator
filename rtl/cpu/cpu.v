@@ -9,7 +9,10 @@
 // Revision     : 1.0 - Initial implementation
 // =============================================================================
 `timescale 1ns / 1ps
-module cpu (
+module cpu #(
+    parameter RESET_PC = 16'h0000
+) 
+(
     input wire clk,
     input wire rst,
     input wire [7:0] data_in,
@@ -101,6 +104,9 @@ module cpu (
     localparam ALU_CB_BIT      = 6'b101110; // CB-prefixed bit instructions
     localparam ALU_CB_RES      = 6'b101111; // CB-prefixed reset bit instructions
     localparam ALU_CB_SET      = 6'b110000; // CB-prefixed set bit instructions
+    localparam ALU_NOP         = 6'b110001; // No operation
+    localparam ALU_HALT        = 6'b110010; // HALT instruction
+    localparam ALU_JP_HL       = 6'b110011; // Jump to address in HL
 
     // Registers
     reg [15:0] pc;   // Program Counter
@@ -132,7 +138,7 @@ module cpu (
 
     // ALU Memory Read
     reg mem_alu_read;  // Flag to indicate that we need to read from memory before ALU operation
-    reg [15:0] mem_alu_data; // Holds the value read from memory for ALU operation
+    reg [7:0] mem_alu_data; // Holds the value read from memory for ALU operation
 
     // Instruction Decoding
     reg [2:0] src;
@@ -168,7 +174,7 @@ module cpu (
     // Determine the operand for CB instructions based on whether it's a memory read or a register read
     always @(dst or mem_alu_read or mem_alu_data or a or b or c or d or e or h or l) begin
         if (mem_alu_read)
-            cb_operand = mem_alu_data[7:0];
+            cb_operand = mem_alu_data;
         else
             cb_operand = get_reg(dst);
     end
@@ -204,7 +210,7 @@ module cpu (
     always @(posedge clk or posedge rst) begin
         if (rst) begin
             // Reset all registers and state
-            pc <= 16'h0000;
+            pc <= RESET_PC;
             sp <= 16'hFFFE;
             a <= 8'h00;
             f <= 8'h00;
@@ -242,7 +248,7 @@ module cpu (
             mem_addr <= 16'h0000;
             mem_data <= 16'h0000;
             mem_alu_read <= 1'b0;
-            mem_alu_data <= 16'h0000;
+            mem_alu_data <= 8'h00;
             alu_imm <= 1'b0;
             mem_wait <= 1'b0;
             ime <= 1'b0;
@@ -479,19 +485,14 @@ module cpu (
 
                     else if (ir == 8'h76) begin
                         // HALT
-                        if (!ime && (ie & if_reg) != 8'h00) begin
-                            // If interrupts are disabled and an interrupt is pending, enter HALT bug state
-                            halt_bug <= 1'b1; // Set halt_bug flag to indicate that the HALT bug is active
-                            state <= STATE_FETCH; // Return to fetch state to execute the next instruction
-                        end
-                        else begin
-                            state <= STATE_HALT; // Enter HALT state, waiting for an interrupt to occur
-                        end
+                        alu_op <= ALU_HALT; // Identify as HALT instruction
+                        state <= STATE_EXECUTE; // Move to execute state for HALT instruction
                     end
 
                     else if (ir == 8'h00) begin
                         // NOP
-                        state <= STATE_FETCH; // Identify as NOP instruction
+                        alu_op <= ALU_NOP; // Identify as NOP instruction
+                        state <= STATE_EXECUTE; // Identify as NOP instruction
                     end
 
                     else if (ir == 8'h31) begin
@@ -585,6 +586,12 @@ module cpu (
                     else if (ir == 8'hCB) begin
                         // CB-prefixed instruction
                         state <= STATE_FETCH_CB; // Move to fetch CB-prefixed instruction state
+                    end
+
+                    else if (ir == 8'hE9) begin
+                        // JP (HL)
+                        alu_op <= ALU_JP_HL; // Identify as JP (HL) instruction
+                        state <= STATE_EXECUTE; // Move to execute state
                     end
 
                     else if (ir[7:6] == 2'b01) begin
@@ -775,6 +782,22 @@ module cpu (
                         state <= STATE_FETCH_IMM; // Move to fetch immediate state
                     end
 
+                    else if (ir[7:6] == 2'b11 && ir[2:0] == 3'b100 && ir[5] == 1'b0) begin
+                        // CALL cc, nn
+                        imm16 <= 1'b1; // Set imm16 to indicate that we need to fetch a 16-bit immediate value
+                        if (ir[4:3] == 2'b00 && !f[F_Z] ||
+                            ir[4:3] == 2'b01 && f[F_Z]  ||
+                            ir[4:3] == 2'b10 && !f[F_C] ||
+                            ir[4:3] == 2'b11 && f[F_C]) begin
+                            alu_op <= ALU_CALL; // Identify as CALL conditional instruction
+                            push_after_imm <= 1'b1; // Set flag to push return address after fetching immediate value
+                        end
+                        else begin 
+                            alu_op <= ALU_NOP; // No operation for non-taken conditional call
+                        end
+                        state <= STATE_FETCH_IMM; // Move to fetch immediate state for conditional call
+                    end
+
                     else if (ir[7:6] == 2'b11 && ir[5:3] == 3'b001 && ir[2:0] == 3'b001) begin
                         // RET
                         alu_op <= ALU_RET; // Identify as RET instruction
@@ -783,7 +806,7 @@ module cpu (
 
                     else if (ir[7:6] == 2'b11 && ir [2:0] == 3'b101 && ir[5:3] != 3'b001) begin
                         dst <= ir[5:3]; // Set destination register pair for PUSH instruction
-                        case (dst)
+                        case (ir[5:3])
                             3'b000: ret_addr <= {b, c};
                             3'b010: ret_addr <= {d, e};
                             3'b100: ret_addr <= {h, l};
@@ -936,7 +959,8 @@ module cpu (
                             state <= STATE_STACK_POP; // Move to stack pop state to retrieve return address if condition is met
                         end
                         else begin
-                            state <= STATE_FETCH; // Return to fetch state if condition is not met
+                            alu_op <= ALU_NOP; // Identify as NOP instruction
+                            state <= STATE_EXECUTE; // Move to execute state for NOP instruction
                         end
                     end
 
@@ -997,7 +1021,7 @@ module cpu (
                         ALU_INC: begin
                             // Handle INC r instruction
                             if (mem_alu_read) begin
-                                f[F_Z] <= (mem_alu_data + 1 == 8'h00); // Set Zero flag if result is zero
+                                f[F_Z] <= (((mem_alu_data + 1) & 8'hFF) == 8'h00); // Set Zero flag if result is zero
                                 f[F_H] <= ((mem_alu_data & 4'hF) + 1 > 4'hF); // Set Half Carry flag if there is a carry from bit 3
                                 f[F_N] <= 1'b0; // Reset Subtract flag for INC
                                 addr <= {h, l}; // Set address to HL for memory write
@@ -1007,7 +1031,7 @@ module cpu (
                                 mem_alu_data <= 8'h00; // Clear memory ALU data after operation
                             end
                             else begin
-                                f[F_Z] <= (get_reg(dst) + 1 == 8'h00); // Set Zero flag if result is zero
+                                f[F_Z] <= (((get_reg(dst) + 1) & 8'hFF) == 8'h00); // Set Zero flag if result is zero
                                 f[F_H] <= ((get_reg(dst) & 4'hF) + 1 > 4'hF); // Set Half Carry flag if there is a carry from bit 3
                                 f[F_N] <= 1'b0; // Reset Subtract flag for INC
 
@@ -1042,7 +1066,7 @@ module cpu (
                         ALU_DEC: begin
                             // Handle DEC r instruction
                             if (mem_alu_read) begin
-                                f[F_Z] <= (mem_alu_data - 1 == 8'h00); // Set Zero flag if result is zero
+                                f[F_Z] <= (((mem_alu_data - 1) & 8'hFF) == 8'h00); // Set Zero flag if result is zero
                                 f[F_H] <= ((mem_alu_data & 4'hF) == 4'h0); // Set Half Carry flag if there is a borrow from bit 4
                                 f[F_N] <= 1'b1; // Set Subtract flag for DEC
                                 addr <= {h, l}; // Set address to HL for memory write
@@ -1052,7 +1076,7 @@ module cpu (
                                 mem_alu_data <= 8'h00; // Clear memory ALU data after operation
                             end
                             else begin
-                                f[F_Z] <= (get_reg(dst) - 1 == 8'h00); // Set Zero flag if result is zero
+                                f[F_Z] <= (((get_reg(dst) - 1) & 8'hFF) == 8'h00); // Set Zero flag if result is zero
                                 f[F_H] <= ((get_reg(dst) & 4'hF) == 4'h0); // Set Half Carry flag if there is a borrow from bit 4
                                 f[F_N] <= 1'b1; // Set Subtract flag for DEC
 
@@ -1500,7 +1524,8 @@ module cpu (
 
                         ALU_RLA: begin
                             // Handle RLA instruction
-                            {f[F_C], a} <= {a[7], a[6:0]} + f[F_C]; // Rotate A left through Carry flag
+                            f[F_C] <= a[7]; // Set Carry flag to the value of bit 7 of A
+                            a <= {a[6:0], f[F_C]}; // Rotate A left through Carry flag
                             f[F_Z] <= 1'b0; // Reset Zero flag for this operation
                             f[F_N] <= 1'b0; // Reset Subtract flag for this operation
                             f[F_H] <= 1'b0; // Reset Half Carry flag for this operation
@@ -1509,7 +1534,8 @@ module cpu (
 
                         ALU_RRA: begin
                             // Handle RRA instruction
-                            {f[F_C], a} <= {f[F_C], a[7:1]}; // Rotate A right through Carry flag
+                            f[F_C] <= a[0]; // Set Carry flag to the value of bit 0 of A
+                            a <= {f[F_C], a[7:1]}; // Rotate A right through Carry flag
                             f[F_Z] <= 1'b0; // Reset Zero flag for this operation
                             f[F_N] <= 1'b0; // Reset Subtract flag for this operation
                             f[F_H] <= 1'b0; // Reset Half Carry flag for this operation
@@ -1846,6 +1872,29 @@ module cpu (
                             state <= STATE_FETCH;
                         end
 
+                        ALU_JP_HL: begin
+                            // JP (HL) instruction
+                            pc <= {h, l}; // Jump to the address in HL
+                            state <= STATE_FETCH; // Return to fetch state
+                        end
+
+                        ALU_HALT: begin
+                            // HALT instruction
+                            if (!ime && (ie & if_reg) != 8'h00) begin
+                                // If interrupts are disabled and an interrupt is pending, enter HALT bug state
+                                halt_bug <= 1'b1; // Set halt_bug flag to indicate that the HALT bug is active
+                                state <= STATE_FETCH; // Return to fetch state to execute the next instruction
+                            end
+                            else begin
+                                state <= STATE_HALT; // Enter HALT state, waiting for an interrupt to occur
+                            end
+                        end
+
+                        ALU_NOP: begin
+                            // No operation
+                            state <= STATE_FETCH;
+                        end
+
 
                         default: state <= STATE_FETCH; // For unimplemented ALU operations, return to fetch
                 
@@ -1936,6 +1985,7 @@ module cpu (
                     end
                 end
 
+                // Handle memory read state
                 STATE_MEM_READ: begin
                     if (!fetch_ready) begin
                         addr <= mem_addr;
@@ -1970,6 +2020,7 @@ module cpu (
                     end
                 end
 
+                // Handle memory write state
                 STATE_MEM_WRITE: begin
                     if(!fetch_ready) begin
                         addr <= mem_addr;
@@ -1994,6 +2045,7 @@ module cpu (
                     end
                 end
 
+                // Handle CB-prefixed instruction fetch state
                 STATE_FETCH_CB: begin
                     if(!fetch_ready) begin
                         addr <= pc;
@@ -2012,6 +2064,7 @@ module cpu (
                     end
                 end
 
+                // Handle CB-prefixed instruction decode state
                 STATE_CB_DECODE: begin
                     dst <= cb_ir[2:0]; // Extract destination register from CB instruction
                     src <= cb_ir[2:0]; // Extract source register from CB instruction
@@ -2032,6 +2085,7 @@ module cpu (
                     end
                 end
 
+                // Default case to handle unexpected states
                 default: begin
                     state <= STATE_FETCH;
                 end

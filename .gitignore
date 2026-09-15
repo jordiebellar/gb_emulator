@@ -6,3 +6,5 @@
 *.runs/
 *.cache/
 roms/boot/
+*.gb
+*.hex
