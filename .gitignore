@@ -9,4 +9,5 @@ roms/boot/
 roms/game/
 *.gb
 *.hex
+!tb/**/*.hex
 sim/tb_cpu

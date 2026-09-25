@@ -14,6 +14,7 @@ module cpu #(
 ) 
 (
     input wire clk,
+    input wire ce_m,
     input wire rst,
     input wire [7:0] data_in,
     input wire [7:0] ie,
@@ -298,10 +299,7 @@ module cpu #(
                             we    <= 1'b0;         // Read operation
                             fetch_ready <= 1'b1;   // Indicate fetch is ready
                         end
-                        else if (!mem_wait) begin
-                            mem_wait <= 1'b1;
-                        end
-                        else begin
+                        else if (ce_m) begin
                             ir <= data_in;         // Load fetched instruction into IR
                             if (halt_bug) begin
                                 halt_bug <= 1'b0; // Clear halt_bug flag
@@ -310,7 +308,6 @@ module cpu #(
                                 pc <= pc + 1;          // Increment PC to point to next instruction
                             end
                             fetch_ready <= 1'b0;   // Reset fetch ready for next cycle
-                            mem_wait <= 1'b0;        // Reset memory wait for next cycle
                             state <= STATE_DECODE; // Move to decode state
                         end
                     end

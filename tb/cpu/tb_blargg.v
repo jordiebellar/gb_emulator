@@ -43,7 +43,7 @@ module tb_blargg;
     cpu #(
         .RESET_PC(16'h0100)
     ) uut (
-        .clk(clk), .rst(rst), .data_in(data_in), .we(we), .addr(addr),
+        .clk(clk), .ce_m(ce_m), .rst(rst), .data_in(data_in), .we(we), .addr(addr),
         .data_out(data_out), .ie(tb_ie), .if_reg(tb_if),
         .if_clear(if_clear), .if_clear_we(if_clear_we)
     );
@@ -71,6 +71,19 @@ module tb_blargg;
         end
     end
 
+    reg [2:0] m_div;
+    reg       ce_m;
+    always @(posedge clk or posedge rst) begin
+        if (rst) begin
+            m_div <= 3'd0;
+            ce_m  <= 1'b0;
+        end
+        else begin
+            m_div <= m_div + 3'd1;
+            ce_m  <= (m_div == 3'd7);
+        end
+    end 
+
     // Mirrors memory_map.v's own IF-clearing logic, same as the
     // presentation testbenches.
     always @(posedge clk or posedge rst) begin
@@ -91,6 +104,10 @@ module tb_blargg;
                 data_out, data_out, uut.pc, uut.sp, uut.a, uut.f, uut.d, uut.e,
                 {uut.b,uut.c}, {uut.h,uut.l});
         end
+        else if (addr == 16'hFF01) begin
+            $write("%c", data_out);
+            tail = {tail[39:0], data_out};
+        end
     end
 
     // Blargg's own docs note some sub-tests take up to half a real-hardware
@@ -98,8 +115,8 @@ module tb_blargg;
     // is generous on purpose. Individual sub-tests should finish well
     // before this in practice.
     initial begin
-        #900_000_000;
-        $display("\nWATCHDOG: 900,000,000ns elapsed without the ROM signaling completion. Aborting.");
+        #4_000_000_000;
+        $display("\nWATCHDOG: 4,000,000,000ns elapsed without the ROM signaling completion. Aborting.");
         $finish;
     end
 
@@ -112,9 +129,18 @@ module tb_blargg;
 
         #20 rst = 0;
 
-        #800_000_000;
-        $display("\n--- 800,000,000ns elapsed, stopping here ---");
+        #3_900_000_000;
+        $display("\n--- 3,900,000,000ns elapsed, stopping here ---");
         $finish;
+    end
+
+    reg [47:0] tail = 48'h0;
+    always @(tail) begin
+        if (tail == "Passed" || tail[39:0] == "ailed") begin
+            #2_000_000;
+            $display("\nDONE at %0t", $time);
+            $finish;
+        end
     end
 
 endmodule

@@ -30,8 +30,8 @@ module tb_gb_top;
     wire        dbg_bus_stall;
 
     gb_top #(
-        .BOOT_ROM_FILE("test_boot_prog.hex"),
-        .CART_ROM_FILE("test_cart_prog.hex")
+        .BOOT_ROM_FILE("tb/integration/test_boot_prog.hex"),
+        .CART_ROM_FILE("tb/integration/test_cart_prog.hex")
     ) dut (
         .clk_100m           (clk_100m),
         .rst                (rst),
