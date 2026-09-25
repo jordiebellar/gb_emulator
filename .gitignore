@@ -6,5 +6,7 @@
 *.runs/
 *.cache/
 roms/boot/
+roms/game/
 *.gb
-*.hexsim/tb_cpu
+*.hex
+sim/tb_cpu
