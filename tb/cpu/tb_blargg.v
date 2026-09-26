@@ -35,18 +35,31 @@ module tb_blargg;
     wire we;
     wire [15:0] addr;
     wire [7:0] data_out;
-    reg  [7:0] tb_ie;
-    reg  [7:0] tb_if;
     wire [7:0] if_clear;
     wire if_clear_we;
+    wire [7:0] ic_ie;
+    wire [7:0] ic_if;
+    wire [7:0] ic_data_out;
+    wire       ic_sel = (addr == 16'hFF0F) || (addr == 16'hFFFF);
+
+    interrupt_ctrl ic (
+        .clk(clk), .rst(rst), .ce_gb(ce_gb), .ce_m(ce_m),
+        .addr(addr), .data_in(data_out), .we(we), .sel(ic_sel),
+        .data_out(ic_data_out), .stall(),
+        .irq_vblank(1'b0), .irq_lcdstat(1'b0), .irq_timer(1'b0),
+        .irq_serial(1'b0), .irq_joypad(1'b0),
+        .if_clear(if_clear), .if_clear_we(if_clear_we),
+        .ie(ic_ie), .if_reg(ic_if)
+    );
 
     cpu #(
         .RESET_PC(16'h0100)
     ) uut (
         .clk(clk), .ce_m(ce_m), .rst(rst), .data_in(data_in), .we(we), .addr(addr),
-        .data_out(data_out), .ie(tb_ie), .if_reg(tb_if),
+        .data_out(data_out), .ie(ic_ie), .if_reg(ic_if),
         .if_clear(if_clear), .if_clear_we(if_clear_we)
     );
+
 
     reg [7:0] ram [0:65535];
 
@@ -57,42 +70,35 @@ module tb_blargg;
     // clear -- standing in for "the transfer always completes instantly"
     // since there's no real serial clock in this model, which is what
     // unblocks a ROM that polls SC waiting for a transfer to finish.
-    assign data_in = (addr == 16'hFFFF) ? tb_ie :
-                      (addr == 16'hFF0F) ? tb_if :
-                      (addr == 16'hFF02) ? {1'b0, ram[addr][6:0]} :
-                      ram[addr];
+    assign data_in = ic_sel              ? ic_data_out :
+                (addr == 16'hFF02)  ? {1'b0, ram[addr][6:0]} :
+                ram[addr];
 
     always @(negedge clk) begin
         if (we && ce_m) begin
-            if (addr == 16'hFFFF) tb_ie <= data_out;
-            else if (addr == 16'hFF0F) tb_if <= data_out;
-            else if (addr == 16'hFF01) begin
+            if (addr == 16'hFF01) begin
                 $write("%c", data_out);
                 tail = {tail[39:0], data_out};
             end
-            else ram[addr] <= data_out;
+            else if (!ic_sel) ram[addr] <= data_out;
         end
     end
 
     reg [2:0] m_div;
     reg       ce_m;
+    reg       ce_gb;
     always @(posedge clk or posedge rst) begin
         if (rst) begin
             m_div <= 3'd0;
             ce_m  <= 1'b0;
+            ce_gb <= 1'b0;
         end
         else begin
             m_div <= m_div + 3'd1;
             ce_m  <= (m_div == 3'd7);
+            ce_gb <= m_div[0];
         end
     end 
-
-    // Mirrors memory_map.v's own IF-clearing logic, same as the
-    // presentation testbenches.
-    always @(posedge clk or posedge rst) begin
-        if (rst) tb_if <= 8'h00;
-        else if (if_clear_we) tb_if <= tb_if & ~if_clear;
-    end
 
     always #10 clk = ~clk;
 
@@ -123,7 +129,6 @@ module tb_blargg;
     initial begin
         clk = 0;
         rst = 1;
-        tb_ie = 8'h00;
         $readmemh("rom.hex", ram, 0, 32767);
 
         #20 rst = 0;

@@ -2,7 +2,7 @@
 // Project      : GameBoy Emulator
 // File         : cpu.v
 // Author       : Jordie Bellar
-// Date         : 2026-09-12
+// Date         : 2026-09-26
 // Description  : Implements the SM83 CPU core. Responsible for fetch,
 //                decode, and execute of all instructions. Manages
 //                internal registers, flags, and memory bus interface.
