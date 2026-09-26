@@ -175,6 +175,8 @@ module cpu #(
     reg new_c;
     reg [7:0] new_a;
 
+    wire [4:0] int_pending = ie[4:0] & if_reg[4:0]; // Pending interrupts after masking with IE register
+
     // CB Instruction Operand
     reg [7:0] cb_operand;
     // Determine the operand for CB instructions based on whether it's a memory read or a register read
@@ -282,38 +284,12 @@ module cpu #(
                     if (ime && (ie & if_reg) != 8'h00) begin
                         ime <= 0;
                         ret_addr <= pc;
-                        if (ie & if_reg & 8'h01) begin       // VBlank
-                            iv_addr <= 16'h0040;             // Vector Address
-                            if_clear <= 8'h01;               // Bit to Clear
-                            if_clear_we <= 1'b1;             // Clear Enable    
-                        end
-                        else if (ie & if_reg & 8'h02) begin  // LCD STAT
-                            iv_addr <= 16'h0048;             // Vector Address
-                            if_clear <= 8'h02;               // Bit to Clear
-                            if_clear_we <= 1'b1;             // Clear Enable
-                        end
-                        else if (ie & if_reg & 8'h04) begin  // Timer
-                            iv_addr <= 16'h0050;             // Vector Address
-                            if_clear <= 8'h04;               // Bit to Clear
-                            if_clear_we <= 1'b1;             // Clear Enable
-                        end    
-                        else if (ie & if_reg & 8'h08) begin  // Serial
-                            iv_addr <= 16'h0058;             // Vector Address
-                            if_clear <= 8'h08;               // Bit to Clear
-                            if_clear_we <= 1'b1;             // Clear Enable
-                        end
-                        else if (ie & if_reg & 8'h10) begin  // Joypad
-                            iv_addr <= 16'h0060;             // Vector Address
-                            if_clear <= 8'h10;               // Bit to Clear
-                            if_clear_we <= 1'b1;             // Clear Enable
-                        end
                         alu_op <= ALU_INT;
                         idle_cnt <= 2'd2;
                         idle_next <= STATE_STACK_PUSH;
                         state <= STATE_IDLE;
                     end
                     else begin
-                        if_clear_we <= 1'b0; // Disable Clear
                         if (!fetch_ready) begin
                             addr  <= pc;           // Set address to PC for fetching instruction
                             we    <= 1'b0;         // Read operation
@@ -1940,6 +1916,43 @@ module cpu #(
                         data_out <= second_stack_fetch ? ret_addr[7:0] : ret_addr[15:8];
                         we       <= 1'b1;
                         fetch_ready <= 1'b1;
+
+                        if (second_stack_fetch && alu_op == ALU_INT) begin
+                            if (int_pending[0]) begin
+                                // Handle VBlank interrupt
+                                iv_addr <= 16'h0040; // VBlank interrupt vector address
+                                if_clear <= 8'h01; // Clear VBlank interrupt flag
+                                if_clear_we <= 1'b1; // Write enable for clearing the interrupt flag
+                            end
+                            else if (int_pending[1]) begin
+                                // Handle LCD STAT interrupt
+                                iv_addr <= 16'h0048; // LCD STAT interrupt vector address
+                                if_clear <= 8'h02; // Clear LCD STAT interrupt flag
+                                if_clear_we <= 1'b1; // Write enable for clearing the interrupt flag
+                            end
+                            else if (int_pending[2]) begin
+                                // Handle Timer interrupt
+                                iv_addr <= 16'h0050; // Timer interrupt vector address
+                                if_clear <= 8'h04; // Clear Timer interrupt flag
+                                if_clear_we <= 1'b1; // Write enable for clearing the interrupt flag
+                            end
+                            else if (int_pending[3]) begin
+                                // Handle Serial interrupt
+                                iv_addr <= 16'h0058; // Serial interrupt vector address
+                                if_clear <= 8'h08; // Clear Serial interrupt flag
+                                if_clear_we <= 1'b1; // Write enable for clearing the interrupt flag
+                            end
+                            else if (int_pending[4]) begin
+                                // Handle Joypad interrupt
+                                iv_addr <= 16'h0060; // Joypad interrupt vector address
+                                if_clear <= 8'h10; // Clear Joypad interrupt flag
+                                if_clear_we <= 1'b1; // Write enable for clearing the interrupt flag
+                            end
+                            else begin
+                                // Cancelled
+                                iv_addr <= 16'h0000; // Default vector address for unexpected interrupt
+                            end
+                        end
                     end
                     else if (ce_m) begin
                         we  <= 1'b0;
@@ -1950,6 +1963,7 @@ module cpu #(
                         end
                         else begin
                             second_stack_fetch <= 1'b0;
+                            if_clear_we <= 1'b0; 
                             state <= STATE_EXECUTE;
                         end
                     end
