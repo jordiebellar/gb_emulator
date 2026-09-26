@@ -46,6 +46,7 @@ module cpu #(
     localparam STATE_MEM_WRITE = 4'd8; // Writes to memory address
     localparam STATE_FETCH_CB = 4'd9; // Fetch CB-prefixed instruction
     localparam STATE_CB_DECODE = 4'd10; // Decode CB-prefixed instruction
+    localparam STATE_IDLE = 4'd11; // Internal M-cycle wait state
 
     // Register Identifiers
     localparam REG_B  = 3'd0;
@@ -121,6 +122,10 @@ module cpu #(
     reg [7:0] cb_ir;  // CB Instruction Register
     reg [15:0] mem_addr; // Memory Address register
     reg [15:0] mem_data; // Holds the value being written
+
+    // Idle State Management
+    reg [1:0] idle_cnt; // Ticks left in the idle state
+    reg [3:0] idle_next; // State to transition to after idle
 
     // State Machine
     reg [3:0] state;
@@ -207,6 +212,17 @@ module cpu #(
             endcase
     endfunction
 
+    // Returns 1 if the condition specified by cc is met, 0 otherwise
+    function cond_met;
+        input [1:0] cc;
+        case (cc)
+            2'b00: cond_met = !f[F_Z];  // NZ
+            2'b01: cond_met =  f[F_Z];  // Z
+            2'b10: cond_met = !f[F_C];  // NC
+            2'b11: cond_met =  f[F_C];  // C
+        endcase
+    endfunction
+
     // Loop
     always @(posedge clk or posedge rst) begin
         if (rst) begin
@@ -255,6 +271,8 @@ module cpu #(
             ime <= 1'b0;
             halt_bug <= 1'b0;
             cb_ir <= 8'h00;
+            idle_cnt <= 2'd0;
+            idle_next <= STATE_FETCH;
         end
         else begin           
             // State Machine for Fetch, Decode, Execute
@@ -290,7 +308,9 @@ module cpu #(
                             if_clear_we <= 1'b1;             // Clear Enable
                         end
                         alu_op <= ALU_INT;
-                        state <= STATE_STACK_PUSH;
+                        idle_cnt <= 2'd2;
+                        idle_next <= STATE_STACK_PUSH;
+                        state <= STATE_IDLE;
                     end
                     else begin
                         if_clear_we <= 1'b0; // Disable Clear
@@ -320,69 +340,67 @@ module cpu #(
                         we <= 1'b0;           // Read operation
                         fetch_ready <= 1'b1;   // Indicate fetch is ready
                     end
-                    else if(!mem_wait) begin
-                        mem_wait <= 1'b1;
-                    end
-                    else if(fetch_ready && !second_fetch) begin
-                        mem_wait <= 1'b0;        // Reset memory wait for next cycle
-                        if(!imm16) begin
-                            n <= data_in;        // Load 8-bit immediate value into 'n'
-                            pc <= pc + 1;        // Increment PC after fetching immediate
-                            fetch_ready <= 1'b0; // Reset fetch ready for next cycle
-                            if (mem_read_after_imm) begin
+                    else if (ce_m) begin
+                        if (!second_fetch) begin
+                            if (!imm16) begin
+                                n <= data_in;        // Load 8-bit immediate value into 'n'
+                                pc <= pc + 1;        // Increment PC after fetching immediate
+                                fetch_ready <= 1'b0; // Reset fetch ready for next cycle
+                                if (mem_read_after_imm) begin
+                                    mem_read_after_imm <= 1'b0; // Reset mem_read_after_imm flag
+                                    mem_addr <= 16'hFF00 + data_in; // Set memory address to the fetched 8-bit immediate value for read
+                                    state <= STATE_MEM_READ; // Move to memory read state
+                                end
+                                else if (mem_write_after_imm) begin
+                                    mem_write_after_imm <= 1'b0; // Reset mem_write_after_imm flag
+                                    mem_data <= get_reg(src); // Set data to be written from source register
+                                    mem_addr <= 16'hFF00 + data_in; // Set memory address to the fetched 8-bit immediate value for write
+                                    state <= STATE_MEM_WRITE; // Move to memory write state
+                                end
+                                else begin
+                                    state <= STATE_EXECUTE; // Move to execute state to execute instruction with immediate value
+                                end
+                            end
+                            else begin
+                                nn[7:0] <= data_in;    // Load lower 8 bits of 16-bit immediate value into 'nn'
+                                pc <= pc + 1;          // Increment PC after fetching immediate
+                                second_fetch <= 1'b1;    // Set second fetch for next instruction
+                                fetch_ready <= 1'b0;   // Reset fetch ready for next cycle
+                            end
+                        end
+                        else begin
+                            nn[15:8] <= data_in;   // Load upper 8 bits of 16-bit immediate value into 'nn'
+                            pc <= pc + 1;          // Increment PC after fetching immediate
+                            second_fetch <= 1'b0;    // Reset second fetch for next instruction
+                            fetch_ready <= 1'b0;   // Reset fetch ready for next cycle
+                            imm16 <= 1'b0;          // Reset imm16 for next instruction
+                            if (mem_write_sp) begin
+                                mem_addr <= {data_in, nn[7:0]}; // Set memory address to the fetched 16-bit immediate value for write
+                                mem_data <= sp[7:0]; // Set data to be written from SP low byte
+                                sp_write_low_done <= 1'b0; // Reset sp_write_low_done flag
+                                state <= STATE_MEM_WRITE; // Move to memory write state
+                            end
+                            else if(push_after_imm) begin
+                                ret_addr <= pc + 1;        // Store return address for CALL instruction
+                                push_after_imm <= 1'b0; // Reset push_after_imm flag
+                                idle_cnt <= 2'd1;
+                                idle_next <= STATE_STACK_PUSH;
+                                state <= STATE_IDLE;
+                            end
+                            else if (mem_read_after_imm) begin
+                                mem_addr <= {data_in, nn[7:0]}; // Set memory address to the fetched 16-bit immediate value for read
                                 mem_read_after_imm <= 1'b0; // Reset mem_read_after_imm flag
-                                mem_addr <= 16'hFF00 + data_in; // Set memory address to the fetched 8-bit immediate value for read
                                 state <= STATE_MEM_READ; // Move to memory read state
                             end
                             else if (mem_write_after_imm) begin
-                                mem_write_after_imm <= 1'b0; // Reset mem_write_after_imm flag
+                                mem_addr <= {data_in, nn[7:0]}; // Set memory address to the fetched 16-bit immediate value for write
                                 mem_data <= get_reg(src); // Set data to be written from source register
-                                mem_addr <= 16'hFF00 + data_in; // Set memory address to the fetched 8-bit immediate value for write
+                                mem_write_after_imm <= 1'b0; // Reset mem_write_after_imm flag
                                 state <= STATE_MEM_WRITE; // Move to memory write state
                             end
                             else begin
                                 state <= STATE_EXECUTE; // Move to execute state to execute instruction with immediate value
                             end
-                        end
-                        else begin
-                            nn[7:0] <= data_in;    // Load lower 8 bits of 16-bit immediate value into 'nn'
-                            pc <= pc + 1;          // Increment PC after fetching immediate
-                            second_fetch <= 1'b1;    // Set second fetch for next instruction
-                            fetch_ready <= 1'b0;   // Reset fetch ready for next cycle
-                        end
-
-                    end
-                    else begin
-                        mem_wait <= 1'b0;        // Reset memory wait for next cycle
-                        nn[15:8] <= data_in;   // Load upper 8 bits of 16-bit immediate value into 'nn'
-                        pc <= pc + 1;          // Increment PC after fetching immediate
-                        second_fetch <= 1'b0;    // Reset second fetch for next instruction
-                        fetch_ready <= 1'b0;   // Reset fetch ready for next cycle
-                        imm16 <= 1'b0;          // Reset imm16 for next instruction
-                        if (mem_write_sp) begin
-                            mem_addr <= {data_in, nn[7:0]}; // Set memory address to the fetched 16-bit immediate value for write
-                            mem_data <= sp[7:0]; // Set data to be written from SP low byte
-                            sp_write_low_done <= 1'b0; // Reset sp_write_low_done flag
-                            state <= STATE_MEM_WRITE; // Move to memory write state
-                        end
-                        else if(push_after_imm) begin
-                            ret_addr <= pc + 1;        // Store return address for CALL instruction
-                            push_after_imm <= 1'b0; // Reset push_after_imm flag
-                            state <= STATE_STACK_PUSH; // Move to stack push state to push return address onto stack
-                        end
-                        else if (mem_read_after_imm) begin
-                            mem_addr <= {data_in, nn[7:0]}; // Set memory address to the fetched 16-bit immediate value for read
-                            mem_read_after_imm <= 1'b0; // Reset mem_read_after_imm flag
-                            state <= STATE_MEM_READ; // Move to memory read state
-                        end
-                        else if (mem_write_after_imm) begin
-                            mem_addr <= {data_in, nn[7:0]}; // Set memory address to the fetched 16-bit immediate value for write
-                            mem_data <= get_reg(src); // Set data to be written from source register
-                            mem_write_after_imm <= 1'b0; // Reset mem_write_after_imm flag
-                            state <= STATE_MEM_WRITE; // Move to memory write state
-                        end
-                        else begin
-                            state <= STATE_EXECUTE; // Move to execute state to execute instruction with immediate value
                         end
                     end  
                 end
@@ -802,6 +820,7 @@ module cpu #(
                     end
 
                     else if (ir[7:6] == 2'b11 && ir [2:0] == 3'b101 && ir[5:3] != 3'b001) begin
+                        // PUSH rr
                         dst <= ir[5:3]; // Set destination register pair for PUSH instruction
                         case (ir[5:3])
                             3'b000: ret_addr <= {b, c};
@@ -810,15 +829,19 @@ module cpu #(
                             3'b110: ret_addr <= {a, f};
                         endcase
                         alu_op <= ALU_PUSH; // Identify as PUSH instruction
-                        state <= STATE_STACK_PUSH;
+                        idle_cnt <= 2'd1;
+                        idle_next <= STATE_STACK_PUSH;
+                        state <= STATE_IDLE;
                     end
 
                     else if (ir[7:6] == 2'b11 && ir[2:0] == 3'b001 && ir[5:3] != 3'b001) begin
+                        // POP rr
                         alu_op <= ALU_POP; // Identify as POP instruction
                         state <= STATE_STACK_POP;
                     end
 
                     else if (ir[7:6] == 2'b11 && ir[2:0] == 3'b010 && ir[5] == 1'b0) begin
+                        // JP cc, nn (conditional jump)
                         alu_op <= ALU_JP_CC; // Identify as JP conditional instruction
                         imm16 <= 1'b1; // Set imm16 to indicate that we need to fetch an 16-bit immediate value
                         state <= STATE_FETCH_IMM;
@@ -943,22 +966,17 @@ module cpu #(
                         ret_addr <= pc; // Store current PC as return address
                         iv_addr <= {10'b0000000000, ir[5:3], 3'b000}; // Calculate interrupt vector address
                         alu_op <= ALU_RST; // Identify as RST instruction
-                        state <= STATE_STACK_PUSH; // Move to stack push state to save return address
+                        idle_cnt <= 2'd1;
+                        idle_next <= STATE_STACK_PUSH;
+                        state <= STATE_IDLE; // Move to idle state before stack push
                     end
 
                     else if (ir[7:6] == 2'b11 && ir[2:0] == 3'b000 && ir[5] == 1'b0) begin
                         // RET NZ/Z/NC/C
                         alu_op <= ALU_RET_CC; // Identify as RET conditional instruction
-                        if (ir[4:3] == 2'b00 && !f[F_Z] ||
-                            ir[4:3] == 2'b01 && f[F_Z] ||
-                            ir[4:3] == 2'b10 && !f[F_C] ||
-                            ir[4:3] == 2'b11 && f[F_C]) begin
-                            state <= STATE_STACK_POP; // Move to stack pop state to retrieve return address if condition is met
-                        end
-                        else begin
-                            alu_op <= ALU_NOP; // Identify as NOP instruction
-                            state <= STATE_EXECUTE; // Move to execute state for NOP instruction
-                        end
+                        idle_cnt <= 2'd1;
+                        idle_next <= cond_met(ir[4:3]) ? STATE_STACK_POP : STATE_FETCH;
+                        state <= STATE_IDLE; // Move to idle state before stack pop
                     end
 
                     else if (ir[7:6] == 2'b00 && ir[2:0] == 3'b111 && ir[5] == 1'b1 && ir[4:3] == 2'b00) begin
@@ -986,13 +1004,12 @@ module cpu #(
                                 REG_L:  l <= get_reg(src);
                                 REG_A:  a <= get_reg(src);
                                 REG_HL: begin
-                                    addr <= {h, l}; // Set address to HL for memory write
-                                    data_out <= get_reg(src); // Set data to be written
-                                    we <= 1'b1; // Enable write
+                                    mem_addr <= {h, l};
+                                    mem_data <= get_reg(src);
                                 end
                                 default: ; // No operation for invalid destination
                             endcase
-                            state <= STATE_FETCH; // Return to fetch state after execution 
+                            state <= (dst == REG_HL) ? STATE_MEM_WRITE : STATE_FETCH;
                         end
 
                         ALU_LD_IMM: begin
@@ -1006,13 +1023,12 @@ module cpu #(
                                 REG_L:  l <= n;
                                 REG_A:  a <= n;
                                 REG_HL: begin
-                                    addr <= {h, l}; // Set address to HL for memory write
-                                    data_out <= n; // Set data to be written
-                                    we <= 1'b1; // Enable write
+                                    mem_addr <= {h, l}; // Set address to HL for memory write
+                                    mem_data <= n; // Set data to be written
                                 end
                                 default: ; // No operation for invalid destination
                             endcase
-                            state <= STATE_FETCH; // Return to fetch state after execution
+                            state <= (dst == REG_HL) ? STATE_MEM_WRITE : STATE_FETCH; // Return to fetch state after execution
                         end
 
                         ALU_INC: begin
@@ -1021,9 +1037,8 @@ module cpu #(
                                 f[F_Z] <= (((mem_alu_data + 1) & 8'hFF) == 8'h00); // Set Zero flag if result is zero
                                 f[F_H] <= ((mem_alu_data & 4'hF) + 1 > 4'hF); // Set Half Carry flag if there is a carry from bit 3
                                 f[F_N] <= 1'b0; // Reset Subtract flag for INC
-                                addr <= {h, l}; // Set address to HL for memory write
-                                data_out <= mem_alu_data + 1; // Set data to be written with result after flags are set
-                                we <= 1'b1; // Enable write 
+                                mem_addr <= {h, l}; // Set address to HL for memory write
+                                mem_data <= mem_alu_data + 1; // Set data to be written with result after flags are set
                                 mem_alu_read <= 1'b0; // Reset memory read flag after operation
                                 mem_alu_data <= 8'h00; // Clear memory ALU data after operation
                             end
@@ -1057,7 +1072,7 @@ module cpu #(
                                     default: ; // No operation for invalid destination
                                 endcase
                             end
-                            state <= STATE_FETCH; // Return to fetch state after execution
+                            state <= mem_alu_read ? STATE_MEM_WRITE : STATE_FETCH;
                         end
 
                         ALU_DEC: begin
@@ -1066,9 +1081,8 @@ module cpu #(
                                 f[F_Z] <= (((mem_alu_data - 1) & 8'hFF) == 8'h00); // Set Zero flag if result is zero
                                 f[F_H] <= ((mem_alu_data & 4'hF) == 4'h0); // Set Half Carry flag if there is a borrow from bit 4
                                 f[F_N] <= 1'b1; // Set Subtract flag for DEC
-                                addr <= {h, l}; // Set address to HL for memory write
-                                data_out <= mem_alu_data - 1; // Set data to be written with result after flags are set
-                                we <= 1'b1; // Enable write 
+                                mem_addr <= {h, l}; // Set address to HL for memory write
+                                mem_data <= mem_alu_data - 1; // Set data to be written with result after flags are set
                                 mem_alu_read <= 1'b0; // Reset memory read flag after operation
                                 mem_alu_data <= 8'h00; // Clear memory ALU data after operation
                             end
@@ -1102,7 +1116,7 @@ module cpu #(
                                     default: ; // No operation for invalid destination
                                 endcase    
                             end
-                            state <= STATE_FETCH; // Return to fetch state after execution
+                            state <= mem_alu_read ? STATE_MEM_WRITE : STATE_FETCH;
                         end
 
                         ALU_ADD: begin
@@ -1285,25 +1299,30 @@ module cpu #(
                         ALU_JP_IMM: begin
                             // Handle JP nn instruction
                             pc <= nn; // Set PC to the immediate 16-bit value
-                            state <= STATE_FETCH; // Return to fetch state after execution
+                            idle_cnt <= 2'd1;
+                            idle_next <= STATE_FETCH;
+                            state <= STATE_IDLE;
                         end
 
                         ALU_JR: begin
                             // Handle JR n instruction
                             pc <= pc + {{8{n[7]}}, n}; // Sign-extend the 8-bit immediate value and add to PC
-                            state <= STATE_FETCH; // Return to fetch state after execution
+                            idle_cnt <= 2'd1;
+                            idle_next <= STATE_FETCH;
+                            state <= STATE_IDLE;
                         end
 
                         ALU_JR_CC: begin
                             // Handle JR cc, n instruction
-                            case (ir[5:3]) // Check the condition code
-                                3'b100: if (!f[F_Z]) pc <= pc + {{8{n[7]}}, n}; // JR NZ, n
-                                3'b101: if (f[F_Z]) pc <= pc + {{8{n[7]}}, n};  // JR Z, n
-                                3'b110: if (!f[F_C]) pc <= pc + {{8{n[7]}}, n}; // JR NC, n
-                                3'b111: if (f[F_C]) pc <= pc + {{8{n[7]}}, n};  // JR C, n
-                                default: ; // No operation for invalid condition codes
-                            endcase
-                            state <= STATE_FETCH; // Return to fetch state after execution
+                            if (cond_met(ir[4:3])) begin
+                                pc <= pc + {{8{n[7]}}, n};
+                                idle_cnt <= 2'd1;
+                                idle_next <= STATE_FETCH;
+                                state <= STATE_IDLE;
+                            end
+                            else begin
+                                state <= STATE_FETCH; // Return to fetch state if condition not met
+                            end
                         end
 
                         ALU_CALL: begin
@@ -1316,13 +1335,17 @@ module cpu #(
                         ALU_RET: begin
                             // Handle RET instruction
                             pc <= ret_addr; // Set PC to the return address popped from the stack
-                            state <= STATE_FETCH; // Return to fetch state after execution
+                            idle_cnt <= 2'd1;
+                            idle_next <= STATE_FETCH;
+                            state <= STATE_IDLE;
                         end
 
                         ALU_INT: begin
                             // Handle Interrupts
                             pc <= iv_addr;
-                            state <= STATE_FETCH;
+                            idle_cnt <= 2'd1;
+                            idle_next <= STATE_FETCH;
+                            state <= STATE_IDLE;
                         end
 
                         ALU_DI: begin
@@ -1338,7 +1361,9 @@ module cpu #(
                         ALU_RETI: begin
                             pc <= ret_addr;
                             ime <= 1'b1;
-                            state <= STATE_FETCH;
+                            idle_cnt <= 2'd1;
+                            idle_next <= STATE_FETCH;
+                            state <= STATE_IDLE;
                         end
 
                         ALU_LD_SP: begin
@@ -1374,14 +1399,15 @@ module cpu #(
 
                         ALU_JP_CC: begin
                             // Handle JP cc, nn instruction
-                            case (ir[5:3]) // Check the condition code
-                                3'b000: if (!f[F_Z]) pc <= nn; // JP NZ, nn
-                                3'b001: if (f[F_Z]) pc <= nn;  // JP Z, nn
-                                3'b010: if (!f[F_C]) pc <= nn; // JP NC, nn
-                                3'b011: if (f[F_C]) pc <= nn;  // JP C, nn
-                                default: ; // No operation for invalid condition codes
-                            endcase
-                            state <= STATE_FETCH; // Return to fetch state after execution
+                            if (cond_met(ir[4:3])) begin
+                                pc <= nn;
+                                idle_cnt <= 2'd1;
+                                idle_next <= STATE_FETCH;
+                                state <= STATE_IDLE;
+                            end
+                            else begin
+                                state <= STATE_FETCH; // Return to fetch state if condition not met
+                            end
                         end
 
                         ALU_ADC: begin
@@ -1443,7 +1469,9 @@ module cpu #(
                         ALU_LD_SP_HL: begin
                             // Handle LD SP, HL instruction
                             sp <= {h, l}; // Load Stack Pointer into HL
-                            state <= STATE_FETCH; // Return to fetch state after execution
+                            idle_cnt <= 2'd1;
+                            idle_next <= STATE_FETCH; // Set the next state after idle
+                            state <= STATE_IDLE; // Transition to idle state
                         end
 
                         ALU_LD_RR_IMM: begin
@@ -1466,7 +1494,9 @@ module cpu #(
                                 2'b11: sp <= sp + 1; // Increment SP
                                 default: ; // No operation for invalid register pair selection
                             endcase
-                            state <= STATE_FETCH; // Return to fetch state after execution
+                            idle_cnt <= 2'd1;
+                            idle_next <= STATE_FETCH; // Set the next state after idle
+                            state <= STATE_IDLE; // Transition to idle state
                         end
 
                         ALU_DEC_RR: begin
@@ -1478,7 +1508,9 @@ module cpu #(
                                 2'b11: sp <= sp - 1; // Decrement SP
                                 default: ; // No operation for invalid register pair selection
                             endcase
-                            state <= STATE_FETCH; // Return to fetch state after execution
+                            idle_cnt <= 2'd1;
+                            idle_next <= STATE_FETCH; // Set the next state after idle
+                            state <= STATE_IDLE; // Transition to idle state
                         end
 
                         ALU_ADD_HL_RR: begin
@@ -1486,7 +1518,9 @@ module cpu #(
                             f[F_N] <= 1'b0; // Reset Subtract flag for ADD
                             f[F_H] <= (({1'b0, h, l} & 16'h0FFF) + ({1'b0, get_rp(rp_sel)} & 16'h0FFF) > 16'h0FFF); // Set Half Carry flag if there is a carry from bit 11
                             {f[F_C], h, l} <= {1'b0, h, l} + {1'b0, get_rp(rp_sel)}; // Set Carry flag and update HL with result
-                            state <= STATE_FETCH; // Return to fetch state after execution
+                            idle_cnt <= 2'd1;
+                            idle_next <= STATE_FETCH; // Set the next state after idle
+                            state <= STATE_IDLE; // Transition to idle state
                         end
 
                         ALU_LD_HL_SP_E8: begin
@@ -1496,7 +1530,9 @@ module cpu #(
                             f[F_H] <= (({1'b0, sp[3:0]} + {1'b0, n[3:0]}) > 5'h0F); // Set Half Carry flag if there is a carry from bit 3
                             f[F_C] <= (({1'b0, sp[7:0]} + {1'b0, n}) > 9'h0FF); // Set Carry flag if there is a carry from bit 7
                             {h, l} <= sp + {{8{n[7]}}, n}; // Update HL with result of SP + signed immediate value
-                            state <= STATE_FETCH; // Return to fetch state after execution
+                            idle_cnt <= 2'd1;
+                            idle_next <= STATE_FETCH;
+                            state <= STATE_IDLE;
                         end
 
                         ALU_RLCA: begin
@@ -1572,7 +1608,9 @@ module cpu #(
                         ALU_RET_CC: begin
                             // Handle RET cc instruction
                             pc <= ret_addr; // Set PC to the return address popped from the stack
-                            state <= STATE_FETCH; // Return to fetch state after execution
+                            idle_cnt <= 2'd1;
+                            idle_next <= STATE_FETCH;
+                            state <= STATE_IDLE;
                         end
 
                         ALU_ADD_SP_E8: begin
@@ -1582,7 +1620,9 @@ module cpu #(
                             f[F_H] <= (({1'b0, sp[3:0]} + {1'b0, n[3:0]}) > 5'h0F); // Set Half Carry flag if there is a carry from bit 3
                             f[F_C] <= (({1'b0, sp[7:0]} + {1'b0, n}) > 9'h0FF); // Set Carry flag if there is a carry from bit 7
                             sp <= sp + {{8{n[7]}}, n}; // Update SP with result of SP + signed immediate value
-                            state <= STATE_FETCH; // Return to fetch state after execution
+                            idle_cnt <= 2'd2;
+                            idle_next <= STATE_FETCH;
+                            state <= STATE_IDLE;
                         end
 
                         ALU_STOP: begin
@@ -1626,9 +1666,8 @@ module cpu #(
                                     f[F_N] <= 1'b0;
                                     f[F_H] <= 1'b0;
                                     if (mem_alu_read) begin
-                                        addr <= {h, l};
-                                        data_out <= {cb_operand[6:0], cb_operand[7]};
-                                        we <= 1'b1;
+                                        mem_addr <= {h, l};
+                                        mem_data <= {cb_operand[6:0], cb_operand[7]};
                                     end else begin
                                         case (dst)
                                             REG_B: b <= {cb_operand[6:0], cb_operand[7]};
@@ -1649,9 +1688,8 @@ module cpu #(
                                     f[F_N] <= 1'b0;
                                     f[F_H] <= 1'b0;
                                     if (mem_alu_read) begin
-                                        addr <= {h, l};
-                                        data_out <= {cb_operand[0], cb_operand[7:1]};
-                                        we <= 1'b1;
+                                        mem_addr <= {h, l};
+                                        mem_data <= {cb_operand[0], cb_operand[7:1]};
                                     end else begin
                                         case (dst)
                                             REG_B: b <= {cb_operand[0], cb_operand[7:1]};
@@ -1672,9 +1710,8 @@ module cpu #(
                                     f[F_N] <= 1'b0;
                                     f[F_H] <= 1'b0;
                                     if (mem_alu_read) begin
-                                        addr <= {h, l};
-                                        data_out <= {cb_operand[6:0], f[F_C]};
-                                        we <= 1'b1;
+                                        mem_addr <= {h, l};
+                                        mem_data <= {cb_operand[6:0], f[F_C]};
                                     end else begin
                                         case (dst)
                                             REG_B: b <= {cb_operand[6:0], f[F_C]};
@@ -1695,9 +1732,8 @@ module cpu #(
                                     f[F_N] <= 1'b0;
                                     f[F_H] <= 1'b0;
                                     if (mem_alu_read) begin
-                                        addr <= {h, l};
-                                        data_out <= {f[F_C], cb_operand[7:1]};
-                                        we <= 1'b1;
+                                        mem_addr <= {h, l};
+                                        mem_data <= {f[F_C], cb_operand[7:1]};
                                     end else begin
                                         case (dst)
                                             REG_B: b <= {f[F_C], cb_operand[7:1]};
@@ -1718,9 +1754,8 @@ module cpu #(
                                     f[F_N] <= 1'b0;
                                     f[F_H] <= 1'b0;
                                     if (mem_alu_read) begin
-                                        addr <= {h, l};
-                                        data_out <= {cb_operand[6:0], 1'b0};
-                                        we <= 1'b1;
+                                        mem_addr <= {h, l};
+                                        mem_data <= {cb_operand[6:0], 1'b0};
                                     end else begin
                                         case (dst)
                                             REG_B: b <= {cb_operand[6:0], 1'b0};
@@ -1741,9 +1776,8 @@ module cpu #(
                                     f[F_N] <= 1'b0;
                                     f[F_H] <= 1'b0;
                                     if (mem_alu_read) begin
-                                        addr <= {h, l};
-                                        data_out <= {cb_operand[7], cb_operand[7:1]};
-                                        we <= 1'b1;
+                                        mem_addr <= {h, l};
+                                        mem_data <= {cb_operand[7], cb_operand[7:1]};
                                     end else begin
                                         case (dst)
                                             REG_B: b <= {cb_operand[7], cb_operand[7:1]};
@@ -1764,9 +1798,8 @@ module cpu #(
                                     f[F_N] <= 1'b0;
                                     f[F_H] <= 1'b0;
                                     if (mem_alu_read) begin
-                                        addr <= {h, l};
-                                        data_out <= {cb_operand[3:0], cb_operand[7:4]};
-                                        we <= 1'b1;
+                                        mem_addr <= {h, l};
+                                        mem_data <= {cb_operand[3:0], cb_operand[7:4]}; 
                                     end else begin
                                         case (dst)
                                             REG_B: b <= {cb_operand[3:0], cb_operand[7:4]};
@@ -1787,9 +1820,8 @@ module cpu #(
                                     f[F_N] <= 1'b0;
                                     f[F_H] <= 1'b0;
                                     if (mem_alu_read) begin
-                                        addr <= {h, l};
-                                        data_out <= {1'b0, cb_operand[7:1]};
-                                        we <= 1'b1;
+                                        mem_addr <= {h, l};
+                                        mem_data <= {1'b0, cb_operand[7:1]};
                                     end else begin
                                         case (dst)
                                             REG_B: b <= {1'b0, cb_operand[7:1]};
@@ -1808,7 +1840,7 @@ module cpu #(
                                 mem_alu_read <= 1'b0;
                                 mem_alu_data <= 16'h0000;
                             end
-                            state <= STATE_FETCH;
+                            state <= mem_alu_read ? STATE_MEM_WRITE : STATE_FETCH;
                         end
 
                         ALU_CB_BIT: begin
@@ -1826,9 +1858,8 @@ module cpu #(
                         ALU_CB_RES: begin
                             // RES b, r
                             if (mem_alu_read) begin
-                                addr <= {h, l};
-                                data_out <= cb_operand & ~(8'h01 << cb_ir[5:3]);
-                                we <= 1'b1;
+                                mem_addr <= {h, l};
+                                mem_data <= cb_operand & ~(8'h01 << cb_ir[5:3]);
                                 mem_alu_read <= 1'b0;
                                 mem_alu_data <= 16'h0000;
                             end else begin
@@ -1843,15 +1874,14 @@ module cpu #(
                                     default: ;
                                 endcase
                             end
-                            state <= STATE_FETCH;
+                            state <= mem_alu_read ? STATE_MEM_WRITE : STATE_FETCH;
                         end
 
                         ALU_CB_SET: begin
                             // SET b, r
                             if (mem_alu_read) begin
-                                addr <= {h, l};
-                                data_out <= cb_operand | (8'h01 << cb_ir[5:3]);
-                                we <= 1'b1;
+                                mem_addr <= {h, l};
+                                mem_data <= cb_operand | (8'h01 << cb_ir[5:3]);
                                 mem_alu_read <= 1'b0;
                                 mem_alu_data <= 16'h0000;
                             end else begin
@@ -1866,7 +1896,7 @@ module cpu #(
                                     default: ;
                                 endcase
                             end
-                            state <= STATE_FETCH;
+                            state <= mem_alu_read ? STATE_MEM_WRITE : STATE_FETCH;
                         end
 
                         ALU_JP_HL: begin
@@ -1905,31 +1935,21 @@ module cpu #(
                 
                 // Handle stack operations
                 STATE_STACK_PUSH: begin
-                    // Handle pushing a 16-bit value onto the stack
-                    if (!second_stack_fetch) begin
-                        if(!fetch_ready) begin
-                            sp <= sp - 1; // Decrement SP by 1 after pushing high byte                    
-                            fetch_ready <= 1'b1; // Indicate fetch is ready
-                        end
-                        else begin
-                            we <= 1'b1; // Enable write
-                            addr <= sp; // Set address to SP
-                            data_out <= ret_addr[15:8];
-                            fetch_ready <= 1'b0; // Reset fetch ready for next cycle
+                    if (!fetch_ready) begin
+                        addr     <= sp - 1;
+                        data_out <= second_stack_fetch ? ret_addr[7:0] : ret_addr[15:8];
+                        we       <= 1'b1;
+                        fetch_ready <= 1'b1;
+                    end
+                    else if (ce_m) begin
+                        we  <= 1'b0;
+                        sp  <= sp - 1;
+                        fetch_ready <= 1'b0;
+                        if (!second_stack_fetch) begin
                             second_stack_fetch <= 1'b1;
                         end
-                    end
-                    else if (second_stack_fetch) begin
-                        if(!fetch_ready) begin
-                            sp <= sp - 1; // Decrement SP by 1 after pushing low byte                          
-                            fetch_ready <= 1'b1; // Indicate fetch is ready
-                        end
                         else begin
-                            we <= 1'b1; // Enable write
-                            addr <= sp; // Set address to SP
-                            data_out <= ret_addr[7:0];
-                            fetch_ready <= 1'b0; // Reset fetch ready for next cycle
-                            second_stack_fetch <= 1'b0; // Reset for next push
+                            second_stack_fetch <= 1'b0;
                             state <= STATE_EXECUTE;
                         end
                     end
@@ -1944,14 +1964,10 @@ module cpu #(
                             we <= 1'b0; // Read operation
                             fetch_ready <= 1'b1; // Indicate fetch is ready
                         end
-                        else if (!mem_wait) begin
-                            mem_wait <= 1'b1; // Indicate that we are waiting for memory read to complete
-                        end
-                        else begin
+                        else if (ce_m) begin
                             ret_addr[7:0] <= data_in; // Read low byte
                             sp <= sp + 1; // Increment SP by 1 after popping low byte
                             fetch_ready <= 1'b0; // Reset fetch ready for next cycle
-                            mem_wait <= 1'b0; // Reset memory wait for next cycle
                             second_stack_fetch <= 1'b1;
                         end
                     end
@@ -1961,14 +1977,10 @@ module cpu #(
                             we <= 1'b0; // Read operation
                             fetch_ready <= 1'b1; // Indicate fetch is ready
                         end
-                        else if (!mem_wait) begin
-                            mem_wait <= 1'b1; // Indicate that we are waiting for memory read to complete
-                        end
-                        else begin
+                        else if (ce_m) begin
                             ret_addr[15:8] <= data_in; // Read high byte
                             sp <= sp + 1; // Increment SP by 1 after popping high byte
                             fetch_ready <= 1'b0; // Reset fetch ready for next cycle
-                            mem_wait <= 1'b0; // Reset memory wait for next cycle
                             second_stack_fetch <= 1'b0; // Reset for next pop
                             state <= STATE_EXECUTE;
                         end
@@ -1989,11 +2001,7 @@ module cpu #(
                         we <= 1'b0;
                         fetch_ready <= 1'b1;
                     end
-                    else if (!mem_wait) begin
-                        mem_wait <= 1'b1; // Indicate that we are waiting for memory read to complete
-                    end
-                    else begin
-                        mem_wait <= 1'b0;        // Reset memory wait for next cycle
+                    else if (ce_m) begin
                         if (!mem_alu_read) begin
                             case (dst)
                                 REG_B:  b <= data_in;
@@ -2019,13 +2027,13 @@ module cpu #(
 
                 // Handle memory write state
                 STATE_MEM_WRITE: begin
-                    if(!fetch_ready) begin
+                    if (!fetch_ready) begin
                         addr <= mem_addr;
                         data_out <= mem_data;
                         we <= 1'b1;
                         fetch_ready <= 1'b1;
                     end
-                    else if(fetch_ready) begin
+                    else if (ce_m) begin
                         we <= 1'b0;
                         fetch_ready <= 1'b0;
                         if (mem_write_sp && !sp_write_low_done) begin
@@ -2049,14 +2057,10 @@ module cpu #(
                         we <= 1'b0;
                         fetch_ready <= 1'b1;
                     end
-                    else if (!mem_wait) begin
-                        mem_wait <= 1'b1;
-                    end
-                    else begin
+                    else if (ce_m) begin
                         cb_ir <= data_in; // Store the fetched CB instruction
                         pc <= pc + 1; // Increment PC after fetching the instruction
                         fetch_ready <= 1'b0; // Reset fetch ready for next cycle
-                        mem_wait <= 1'b0; // Reset memory wait for next cycle
                         state <= STATE_CB_DECODE; // Transition to CB decode state
                     end
                 end
@@ -2079,6 +2083,16 @@ module cpu #(
                     end
                     else begin
                         state <= STATE_EXECUTE; // Transition to execute state for register operations
+                    end
+                end
+
+                // Handle idle state
+                STATE_IDLE: begin
+                    if (ce_m) begin
+                        if (idle_cnt == 2'd1)
+                            state <= idle_next;
+                        else
+                            idle_cnt <= idle_cnt - 2'd1;
                     end
                 end
 

@@ -63,10 +63,13 @@ module tb_blargg;
                       ram[addr];
 
     always @(negedge clk) begin
-        if (we) begin
+        if (we && ce_m) begin
             if (addr == 16'hFFFF) tb_ie <= data_out;
             else if (addr == 16'hFF0F) tb_if <= data_out;
-            else if (addr == 16'hFF01) $write("%c", data_out); // serial character out
+            else if (addr == 16'hFF01) begin
+                $write("%c", data_out);
+                tail = {tail[39:0], data_out};
+            end
             else ram[addr] <= data_out;
         end
     end
@@ -99,14 +102,10 @@ module tb_blargg;
     integer hb;
     initial hb = 0;
     always @(negedge clk) begin
-        if (we && addr == 16'hFF01) begin
+        if (we && ce_m && addr == 16'hFF01) begin
             $display("SERIAL '%c' (0x%h)  pc=%h sp=%h a=%h f=%h d=%h e=%h bc=%h hl=%h",
                 data_out, data_out, uut.pc, uut.sp, uut.a, uut.f, uut.d, uut.e,
                 {uut.b,uut.c}, {uut.h,uut.l});
-        end
-        else if (addr == 16'hFF01) begin
-            $write("%c", data_out);
-            tail = {tail[39:0], data_out};
         end
     end
 
