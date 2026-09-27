@@ -2,16 +2,6 @@
 // Project      : GameBoy Emulator
 // File         : tb_interrupt_ctrl.v
 // Author       : Jordie Bellar
-// Date         : 2026-09-12
-// Description  : Testbench for the GameBoy interrupt controller. Responsible for
-//                verifying the correct behavior of the IE and IF registers,
-//                and handling of interrupt requests and acknowledgments.
-// Revision     : 1.0 - Initial implementation
-// =============================================================================
-// =============================================================================
-// Project      : GameBoy Emulator
-// File         : tb_interrupt_ctrl.v
-// Author       : Jordie Bellar
 // Date         : 2026-09-26
 // Description  : Self-checking unit testbench for interrupt_ctrl.v.
 //
@@ -23,6 +13,10 @@
 //                Stimulus convention: every input changes 1 ns after a rising
 //                edge, so it is stable well before the next edge samples it.
 //
+//                Reads are combinational and return the post-edge value, so
+//                bus_read samples data_out mid-clock, before the edge, the
+//                same way the CPU samples data_in on its ce_m edge.
+//
 //                Covers:
 //                  - reset values and both read-back formats
 //                  - IE stores all 8 bits, IF stores only 5
@@ -31,12 +25,16 @@
 //                    concatenation), sampled on ce_gb only
 //                  - acknowledge commits on ce_m only
 //                  - same-clock collisions: request wins
+//                  - a read on a request edge sees the new bit
 //                  - CPU-facing if_reg has upper bits 0 (no phantom pending)
 //                  - accesses without sel are ignored
 //
 //                Run:
 //                  iverilog -o sim/tb_interrupt_ctrl tb/cpu/tb_interrupt_ctrl.v rtl/cpu/interrupt_ctrl.v
 //                  vvp sim/tb_interrupt_ctrl
+// Revision     : 1.0 - Initial implementation
+//                1.1 - Next-state reads: sample before the edge, add
+//                      same-edge read checks
 // =============================================================================
 `timescale 1ns / 1ps
 module tb_interrupt_ctrl;
@@ -122,17 +120,20 @@ module tb_interrupt_ctrl;
         end
     endtask
 
-    // A bus read. data_out is registered, so one edge after sel/addr.
+    // A bus read on a clock with no enables. data_out is combinational
+    // (post-edge value), so it is sampled mid-clock, before the edge.
+    // With no enables, post-edge equals current state.
     task bus_read(input [15:0] a);
         begin
             sel = 1'b1; we = 1'b0; addr = a;
-            tick(0, 0);
+            #2;
             rd = data_out;
+            tick(0, 0);
             sel = 1'b0;
         end
     endtask
 
-    // Raise one request line for one ce_gb period (one sampling tick).
+    // Raise one request line for one clock, the clock carrying ce_gb.
     task request(input [2:0] n);
         begin
             case (n)
@@ -252,6 +253,18 @@ module tb_interrupt_ctrl;
         if_clear_we = 1'b0; if_clear = 8'h00; irq_timer = 1'b0;
         expect8("ack bit 2 + timer same clock",    if_reg, 8'h04);
 
+        // ---- Same-edge read: hardware update first, then the access -----
+        $display("\n-- same-edge read --");
+        bus_write(ADDR_IF, 8'h00);
+        sel = 1'b1; we = 1'b0; addr = ADDR_IF;
+        irq_timer = 1'b1; ce_gb = 1'b1; ce_m = 1'b1;   // CPU samples on this edge
+        #2;
+        rd = data_out;
+        expect8("IF read on request edge sees bit", rd,    8'hE4);
+        @(posedge clk); #1;
+        ce_gb = 1'b0; ce_m = 1'b0; irq_timer = 1'b0; sel = 1'b0;
+        expect8("bit is stored after the edge",    if_reg, 8'h04);
+
         // ---- CPU view has no phantom bits --------------------------------
         $display("\n-- CPU view --");
         bus_write(ADDR_IE, 8'hFF);
@@ -269,7 +282,7 @@ module tb_interrupt_ctrl;
         we = 1'b0;
         expect8("write without sel ignored",       if_reg, 8'h04);
         sel = 1'b0; addr = ADDR_IF;
-        tick(0, 0);
+        #2;
         expect8("data_out is 00 when not selected", data_out, 8'h00);
         expect8("stall is always low",             {7'b0, stall}, 8'h00);
 

@@ -8,31 +8,46 @@
 //                Enables come from a free-running divider shaped like
 //                clk_div (ce_gb every 4 clocks, ce_m on every 4th ce_gb),
 //                because the counter/M-cycle alignment is part of what is
-//                under test. All CPU writes are driven the way the contract
+//                under test. CPU accesses are driven the way the contract
 //                says the CPU performs them: bus held from the start of an
-//                M-cycle, committing on the ce_m edge that ends it.
+//                M-cycle, and the access happens on the ce_m edge that ends
+//                it. A write commits on that edge; a read samples the
+//                combinational (post-edge) data_out just before it.
+//
+//                Edge ordering under test: on every M-cycle edge the timer's
+//                own update happens first, then the CPU's access. So a read
+//                on a tick edge sees the ticked value, and a write on a tick
+//                edge overrides the tick.
 //
 //                Edge numbering used in the comments: setup() leaves the
 //                system counter at 8 on edge E3; every later M-cycle edge
 //                adds 4 T-cycles. With TAC select 01 (bit 3), the first
 //                natural tick is E5 (counter 16), then every 4 edges.
+//                Every cpu_write and cpu_read consumes one M-cycle edge.
 //
 //                Covers:
 //                  - reset values and TAC's upper-bit read-back
 //                  - DIV counting and DIV-write reset
 //                  - TIMA rate for two TAC selects
+//                  - read on a tick edge sees the post-tick value
 //                  - every row of the glitch table (DIV write, disable,
 //                    select change, change while disabled, enable)
-//                  - overflow: 00 during A, reload and strobe on the same
-//                    edge at the start of B
-//                  - TIMA write in A cancels, TIMA write in B ignored,
-//                    TMA write in B reaches TIMA, TMA write in A is used
-//                  - design choice: TIMA write on the tick edge wins
+//                  - overflow: end of A reads 00, end of B reads TMA, and
+//                    the strobe lands on the reload edge
+//                  - rule 1: TIMA write on the overflow edge cancels
+//                  - rule 2: TIMA write on the reload edge is ignored
+//                  - rule 3: TMA write on the reload edge reaches TIMA
+//                  - TMA write on the overflow edge is used by the reload
+//                  - TIMA write on an ordinary tick edge wins
 //                  - monitors: every tick and every strobe lands on ce_m
 //
 //                Run:
 //                  iverilog -o sim/tb_timer tb/timer/tb_timer.v rtl/timer/timer.v
 //                  vvp sim/tb_timer
+// Revision     : 1.0 - Initial implementation
+//                1.1 - Hardware-first edge ordering: reads sample before the
+//                      edge, A/B mapping shifted to the overflow and reload
+//                      edges
 // =============================================================================
 `timescale 1ns / 1ps
 module tb_timer;
@@ -143,13 +158,16 @@ module tb_timer;
         end
     endtask
 
-    // CPU read: registered, one clock. Called right after an M-cycle edge,
-    // it finishes long before the next one (16 clocks per M-cycle here).
+    // CPU read: bus held through the M-cycle, data sampled on its ending
+    // edge. data_out is the post-edge value, so it is captured at the
+    // negedge just before that edge, which is what the CPU latches.
     task cpu_read(input [1:0] r);
         begin
             sel = 1'b1; we = 1'b0; addr = 16'hFF04 + r;
-            @(posedge clk); #1;
+            @(negedge clk);
+            while (ce_m !== 1'b1) @(negedge clk);
             rd = data_out;
+            @(posedge clk); #1;
             sel = 1'b0;
         end
     endtask
@@ -197,8 +215,9 @@ module tb_timer;
         // ---- TIMA rate -------------------------------------------------
         $display("\n-- TIMA rate --");
         setup(8'h05);
-        cpu_read(R_TAC);  expect8("TAC reads FD after writing 05", rd, 8'hFD);
-        repeat (8) m_edge;                  // E4..E11: ticks at E5, E9
+        cpu_read(R_TAC);                    // E4
+        expect8("TAC reads FD after writing 05",      rd, 8'hFD);
+        repeat (8) m_edge;                  // E5..E12: ticks at E5, E9
         expect8("select 01: 2 ticks in 8 M-cycles",   uut.tima, 8'h02);
 
         setup(8'h06);                       // select 10 = bit 5
@@ -206,6 +225,14 @@ module tb_timer;
         expect8("select 10: no tick before counter 64", uut.tima, 8'h00);
         m_edge;                             // E17: counter 64, bit 5 falls
         expect8("select 10: tick at counter 64",      uut.tima, 8'h01);
+
+        // ---- Read ordering -----------------------------------------------
+        $display("\n-- read ordering --");
+        setup(8'h05);
+        cpu_read(R_TIMA);                   // E4: no tick on this edge
+        expect8("read on a non-tick edge",            rd, 8'h00);
+        cpu_read(R_TIMA);                   // E5: tick on this edge
+        expect8("read on tick edge sees post-tick",   rd, 8'h01);
 
         // ---- Glitch table ------------------------------------------------
         $display("\n-- glitch table --");
@@ -243,69 +270,63 @@ module tb_timer;
         setup(8'h05);
         cpu_write(R_TIMA, 8'hFF);           // E4
         irq_base = irq_count;
-        m_edge;                             // E5: FF -> 00, cycle A begins
-        expect8("A: TIMA register is 00",             uut.tima, 8'h00);
-        cpu_read(R_TIMA);
-        expect8("A: TIMA reads 00",                   rd, 8'h00);
+        cpu_read(R_TIMA);                   // E5: overflow edge, end of A
+        expect8("A: read on overflow edge sees 00",   rd, 8'h00);
         expect8("A: no interrupt yet",                irq_count - irq_base, 8'd0);
-        m_edge;                             // E6: reload + strobe, B begins
-        expect8("B: TIMA reloaded from TMA",          uut.tima, 8'h23);
+        cpu_read(R_TIMA);                   // E6: reload edge, end of B
+        expect8("B: read on reload edge sees TMA",    rd, 8'h23);
+        expect8("B: TIMA register reloaded",          uut.tima, 8'h23);
         expect8("B: strobe fired on the reload edge", irq_count - irq_base, 8'd1);
-        m_edge;                             // E7: end of B
+        m_edge;                             // E7
         expect8("after B: TIMA still TMA",            uut.tima, 8'h23);
         expect8("after B: exactly one strobe",        irq_count - irq_base, 8'd1);
 
-        // ---- Rule 1: TIMA write in A cancels -----------------------------
+        // ---- Rule 1: TIMA write on the overflow edge cancels -------------
         $display("\n-- write rules --");
         setup(8'h05);
         cpu_write(R_TIMA, 8'hFF);           // E4
         irq_base = irq_count;
-        m_edge;                             // E5: overflow, cycle A
-        cpu_write(R_TIMA, 8'h42);           // E6: write during A
+        cpu_write(R_TIMA, 8'h42);           // E5: write on the overflow edge
         expect8("rule 1: written value kept",         uut.tima, 8'h42);
-        m_edge;                             // E7
+        m_edge;                             // E6: no reload
         expect8("rule 1: no reload afterwards",       uut.tima, 8'h42);
         expect8("rule 1: no interrupt",               irq_count - irq_base, 8'd0);
 
-        // ---- Rule 2: TIMA write in B ignored -----------------------------
+        // ---- Rule 2: TIMA write on the reload edge ignored ---------------
         setup(8'h05);
         cpu_write(R_TIMA, 8'hFF);           // E4
         irq_base = irq_count;
         m_edge;                             // E5: overflow
-        m_edge;                             // E6: reload
-        cpu_write(R_TIMA, 8'h99);           // E7: write during B
-        expect8("rule 2: TIMA write in B ignored",    uut.tima, 8'h23);
-        expect8("rule 2: interrupt still fired once", irq_count - irq_base, 8'd1);
+        cpu_write(R_TIMA, 8'h99);           // E6: write on the reload edge
+        expect8("rule 2: TIMA write ignored",         uut.tima, 8'h23);
+        expect8("rule 2: interrupt fired once",       irq_count - irq_base, 8'd1);
 
-        // ---- Rule 3: TMA write in B reaches TIMA ---------------------------
+        // ---- Rule 3: TMA write on the reload edge reaches TIMA -----------
         setup(8'h05);
         cpu_write(R_TIMA, 8'hFF);           // E4
+        irq_base = irq_count;
         m_edge;                             // E5: overflow
-        m_edge;                             // E6: reload with 23
-        cpu_write(R_TMA, 8'h55);            // E7: TMA write during B
-        expect8("rule 3: TIMA follows new TMA",       uut.tima, 8'h55);
+        cpu_write(R_TMA, 8'h55);            // E6: TMA write on the reload edge
+        expect8("rule 3: TIMA takes new TMA",         uut.tima, 8'h55);
         expect8("rule 3: TMA holds new value",        uut.tma,  8'h55);
+        expect8("rule 3: interrupt fired once",       irq_count - irq_base, 8'd1);
 
-        // ---- TMA write in A is used by the reload (TMA is a latch) -------
+        // ---- TMA write on the overflow edge is used by the reload --------
         cpu_write(R_TMA, 8'h23);
         setup(8'h05);
         cpu_write(R_TIMA, 8'hFF);           // E4
         irq_base = irq_count;
-        m_edge;                             // E5: overflow
-        cpu_write(R_TMA, 8'h66);            // E6: TMA write, reload same edge
+        cpu_write(R_TMA, 8'h66);            // E5: overflow edge
+        m_edge;                             // E6: reload
         expect8("TMA write in A: reload uses it",     uut.tima, 8'h66);
         expect8("TMA write in A: interrupt fires",    irq_count - irq_base, 8'd1);
 
-        // ---- Design choice: TIMA write on the tick edge wins ------------
-        $display("\n-- design choice --");
+        // ---- Write on an ordinary tick edge wins -------------------------
+        $display("\n-- write vs tick --");
         setup(8'h05);
-        cpu_write(R_TIMA, 8'hFF);           // E4
-        irq_base = irq_count;
-        cpu_write(R_TIMA, 8'h10);           // E5: write on the tick edge
-        expect8("write on tick edge wins",            uut.tima, 8'h10);
-        repeat (3) m_edge;                  // E6..E8: no ticks due
-        expect8("no overflow sequence followed",      uut.tima, 8'h10);
-        expect8("no interrupt from suppressed tick",  irq_count - irq_base, 8'd0);
+        m_edge;                             // E4
+        cpu_write(R_TIMA, 8'h10);           // E5: natural tick edge
+        expect8("write on tick edge wins (10, not 11)", uut.tima, 8'h10);
 
         // ---- Monitors ------------------------------------------------------
         $display("\n-- monitors --");

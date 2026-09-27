@@ -7,6 +7,7 @@
 //                managing the IE and IF registers, and handling interrupt
 //                requests and acknowledgments.
 // Revision     : 1.0 - Initial implementation
+//                1.1 - Hardware-first edge ordering, next-state reads
 // =============================================================================
 
 `timescale 1ns / 1ps
@@ -20,15 +21,15 @@ module interrupt_ctrl (
     input wire we,                 // Write enable signal
     input wire sel,                // select signal
     input wire irq_vblank,         // VBlank interrupt request
-    input wire irq_lcdstat,       // LCD STAT interrupt request
+    input wire irq_lcdstat,        // LCD STAT interrupt request
     input wire irq_timer,          // Timer interrupt request
     input wire irq_serial,         // Serial interrupt request
     input wire irq_joypad,         // Joypad interrupt request
     input wire [7:0] if_clear,     // IF register clear mask
     input wire if_clear_we,        // IF clear write enable
     output wire [7:0] ie,          // IE register
-    output wire [7:0] if_reg,      // IF register
-    output reg [7:0] data_out,     // Data output bus
+    output wire [7:0] if_reg,      // IF register (CPU view, upper bits 0)
+    output reg [7:0] data_out,     // Data output bus (combinational, post-edge value)
     output wire stall              // Stall signal
 );
 
@@ -46,6 +47,9 @@ wire [4:0] irq_req = {irq_joypad, irq_serial, irq_timer, irq_lcdstat, irq_vblank
 wire bus_wr = sel && we && ce_m;
 wire wr_if = bus_wr && (addr == ADDR_IF);
 wire wr_ie = bus_wr && (addr == ADDR_IE);
+
+// Next value of the IE register
+wire [7:0] ie_next = wr_ie ? data_in : ie_r;
 
 // Next value computation for the IF register
 reg [4:0] if_next;
@@ -75,30 +79,20 @@ always @(posedge clk or posedge rst) begin
         ie_r <= 8'b0;
         if_r <= 5'b0;
     end
-    // Update condition for the IE and IF registers
+    // Update the IE and IF registers with their next computed values
     else begin
-        // Update the IE register if a write to it is requested
-        if (wr_ie) begin
-            ie_r <= data_in;
-        end
-        // Update the IF register with the next computed value
+        ie_r <= ie_next;
         if_r <= if_next;
     end
 end
 
-// Sequential logic for updating the data output based on the selected address
-always @(posedge clk or posedge rst) begin
-    // Reset condition for the data output register
-    if (rst) begin
-        data_out <= 8'b0;
+// Combinational logic for the data output: post-edge values, so a read sees this edge's update
+always @(*) begin
+    if (sel) begin
+        data_out = (addr == ADDR_IE) ? ie_next : {3'b111, if_next};
     end
-    // Update condition for the data output register
-    else if (sel) begin
-        data_out <= (addr == ADDR_IE) ? ie_r : {3'b111, if_r};
-    end
-    // Default condition for the data output register
     else begin
-        data_out <= 8'h00;
+        data_out = 8'h00;
     end
 end
 

@@ -41,15 +41,25 @@ module tb_blargg;
     wire [7:0] ic_if;
     wire [7:0] ic_data_out;
     wire       ic_sel = (addr == 16'hFF0F) || (addr == 16'hFFFF);
+    wire [7:0] tm_data_out;
+    wire tm_irq;
+    wire tm_sel = (addr[15:2] == 14'h3FC1); // FF04-FC07 (TIMA, TMA, TAC)
 
     interrupt_ctrl ic (
         .clk(clk), .rst(rst), .ce_gb(ce_gb), .ce_m(ce_m),
         .addr(addr), .data_in(data_out), .we(we), .sel(ic_sel),
         .data_out(ic_data_out), .stall(),
-        .irq_vblank(1'b0), .irq_lcdstat(1'b0), .irq_timer(1'b0),
+        .irq_vblank(1'b0), .irq_lcdstat(1'b0), .irq_timer(tm_irq),
         .irq_serial(1'b0), .irq_joypad(1'b0),
         .if_clear(if_clear), .if_clear_we(if_clear_we),
         .ie(ic_ie), .if_reg(ic_if)
+    );
+
+    timer tm (
+        .clk(clk), .rst(rst), .ce_gb(ce_gb), .ce_m(ce_m),
+        .addr(addr), .data_in(data_out), .we(we), .sel(tm_sel),
+        .data_out(tm_data_out), .stall(),
+        .irq_timer(tm_irq)
     );
 
     cpu #(
@@ -71,8 +81,9 @@ module tb_blargg;
     // since there's no real serial clock in this model, which is what
     // unblocks a ROM that polls SC waiting for a transfer to finish.
     assign data_in = ic_sel              ? ic_data_out :
-                (addr == 16'hFF02)  ? {1'b0, ram[addr][6:0]} :
-                ram[addr];
+                     tm_sel              ? tm_data_out :
+                     (addr == 16'hFF02)  ? {1'b0, ram[addr][6:0]} :
+                     ram[addr];
 
     always @(negedge clk) begin
         if (we && ce_m) begin
@@ -80,7 +91,7 @@ module tb_blargg;
                 $write("%c", data_out);
                 tail = {tail[39:0], data_out};
             end
-            else if (!ic_sel) ram[addr] <= data_out;
+            else if (!ic_sel && !tm_sel) ram[addr] <= data_out;
         end
     end
 
