@@ -150,10 +150,12 @@ module tb_blargg;
     end
 
     reg [47:0] tail = 48'h0;
+    reg verdict;
     always @(tail) begin
         if (tail == "Passed" || tail[39:0] == "ailed") begin
+            verdict = (tail == "Passed");
             #2_000_000;
-            $display("\nDONE at %0t", $time);
+            $display("\nRESULT: %s at %0t", verdict ? "PASSED" : "FAILED", $time);
             $finish;
         end
     end
