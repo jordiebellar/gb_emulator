@@ -18,8 +18,10 @@ module tb_ppu_mode_fsm;
     wire [7:0] ly;
     wire       oam_stall;
     wire       vram_stall;
+    wire       entering_hblank;
+    wire       entering_oam_scan;
+    wire       entering_vblank;
     wire       irq_vblank;
-    wire       irq_lcdstat;
 
     initial clk = 1'b0;
     always #5 clk = ~clk;
@@ -29,17 +31,19 @@ module tb_ppu_mode_fsm;
     integer cyc;
 
     ppu_mode_fsm dut (
-        .clk         (clk),
-        .ce_gb       (ce_gb),
-        .rst         (rst),
-        .fifo_done   (fifo_done),
-        .mode        (mode),
-        .dot_counter (dot_counter),
-        .ly          (ly),
-        .oam_stall   (oam_stall),
-        .vram_stall  (vram_stall),
-        .irq_vblank  (irq_vblank),
-        .irq_lcdstat (irq_lcdstat)
+        .clk               (clk),
+        .ce_gb             (ce_gb),
+        .rst               (rst),
+        .fifo_done         (fifo_done),
+        .mode              (mode),
+        .dot_counter       (dot_counter),
+        .ly                (ly),
+        .oam_stall         (oam_stall),
+        .vram_stall        (vram_stall),
+        .entering_hblank   (entering_hblank),
+        .entering_oam_scan (entering_oam_scan),
+        .entering_vblank   (entering_vblank),
+        .irq_vblank        (irq_vblank)
     );
 
     always @(*) begin
@@ -77,10 +81,16 @@ module tb_ppu_mode_fsm;
         check(mode === MODE_PIXEL_TRANSFER, "line 0: mode2->3 exactly at cycle 80");
 
         repeat (172) begin @(posedge clk); cyc = cyc + 1; end
+        check(entering_hblank === 1'b1, "entering_hblank strobes exactly at mode3->0, pre-settle");
+        check(entering_oam_scan === 1'b0, "entering_oam_scan is not also asserted here");
+        check(entering_vblank === 1'b0, "entering_vblank is not also asserted here");
         @(negedge clk);
         check(mode === MODE_HBLANK, "line 0: mode3->0 exactly at cycle 252 (fifo_done)");
 
         repeat (456 - 252) begin @(posedge clk); cyc = cyc + 1; end
+        check(entering_oam_scan === 1'b1, "entering_oam_scan strobes exactly at the line wrap, pre-settle");
+        check(entering_hblank === 1'b0, "entering_hblank is not also asserted here");
+        check(entering_vblank === 1'b0, "entering_vblank is not also asserted here");
         @(negedge clk);
         check(dot_counter === 9'd0, "line 0->1: dot_counter wraps to 0 at cycle 456");
         check(ly === 8'd1, "line 0->1: ly increments to 1");
@@ -98,6 +108,9 @@ module tb_ppu_mode_fsm;
         @(posedge clk); cyc = cyc + 1;
 
         check(irq_vblank === 1'b1, "irq_vblank strobes exactly on this edge, checked pre-settle");
+        check(entering_vblank === 1'b1, "entering_vblank matches irq_vblank");
+        check(entering_hblank === 1'b0, "entering_hblank is not also asserted at vblank entry");
+        check(entering_oam_scan === 1'b0, "entering_oam_scan is not also asserted at vblank entry");
 
         @(negedge clk);
         check(cyc == 65664, "vblank entry lands on the predicted cycle");
@@ -111,6 +124,10 @@ module tb_ppu_mode_fsm;
 
         while (cyc < 70223) begin @(posedge clk); cyc = cyc + 1; end
         @(posedge clk); cyc = cyc + 1;
+
+        check(entering_oam_scan === 1'b1, "entering_oam_scan strobes at the frame wrap too, pre-settle");
+        check(entering_vblank === 1'b0, "entering_vblank is not also asserted at the frame wrap");
+
         @(negedge clk);
         check(cyc == 70224, "frame wrap lands on the predicted cycle");
         check(ly === 8'd0, "ly wraps back to 0 for the new frame");

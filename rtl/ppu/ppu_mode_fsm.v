@@ -7,21 +7,21 @@
 //                  drive mode 2 (oam scan, fixed 80 dots), mode 0 (hblank,
 //                  fills the rest of the line), and mode 1 (vblank, 10
 //                  extra lines). mode 3 (pixel transfer) exits on
-//                  fifo_done from the fetcher, not a dot count, since its
-//                  length is variable under the fifo model. drives
-//                  oam_stall/vram_stall (now just a "which range is
-//                  blocked right now" flag consumed by vram/oam
-//                  themselves, since there is no bus_stall anymore -
-//                  section 4). irq_vblank is a combinational strobe
-//                  (section 5), derived from the exact same condition
-//                  that drives the mode transition, not a registered
-//                  pulse. irq_lcdstat depends on the stat/lyc register
-//                  file, which doesn't exist yet - stubbed low for now.
-// Revision     : 2.0 - renamed ce to ce_gb (this is t-cycle logic per
-//                  section 6). fixed irq_vblank from a registered pulse
-//                  to a combinational strobe - the old version added a
-//                  t-cycle of latency, the same class of bug ce_m's
-//                  design in clk_div.v was written to avoid.
+//                  fifo_done from the fetcher. exports entering_hblank/
+//                  entering_oam_scan/entering_vblank as combinational,
+//                  same-edge strobes of each transition's own guard
+//                  condition - ppu_reg.v's STAT mode-interrupts consume
+//                  these directly instead of re-deriving "mode changed"
+//                  from the already-exported mode value, which would lag
+//                  by one ce_gb tick (the same latency bug irq_vblank and
+//                  irq_joypad were fixed to avoid, just one hop further
+//                  away). irq_vblank is literally entering_vblank.
+//                  irq_lcdstat now lives in ppu_reg.v, which has the
+//                  stat enable bits.
+// Revision     : 2.1 - exported entering_hblank/entering_oam_scan/
+//                  entering_vblank for ppu_reg.v's stat interrupt logic.
+//                  removed irq_lcdstat (moved to ppu_reg.v, the module
+//                  that actually owns stat's enable bits).
 // =============================================================================
 `timescale 1ns / 1ps
 
@@ -38,8 +38,10 @@ module ppu_mode_fsm (
     output wire       oam_stall,
     output wire       vram_stall,
 
-    output wire       irq_vblank,
-    output wire       irq_lcdstat
+    output wire       entering_hblank,
+    output wire       entering_oam_scan,
+    output wire       entering_vblank,
+    output wire       irq_vblank
 );
 
     localparam MODE_HBLANK         = 2'd0;
@@ -49,9 +51,13 @@ module ppu_mode_fsm (
 
     assign oam_stall   = (mode == MODE_OAM_SCAN) || (mode == MODE_PIXEL_TRANSFER);
     assign vram_stall  = (mode == MODE_PIXEL_TRANSFER);
-    assign irq_lcdstat = 1'b0;
 
-    assign irq_vblank = ce_gb && (dot_counter == 9'd455) && (ly == 8'd143);
+    assign entering_hblank    = ce_gb && (dot_counter != 9'd455) &&
+                                 (mode == MODE_PIXEL_TRANSFER) && fifo_done;
+    assign entering_oam_scan  = ce_gb && (dot_counter == 9'd455) &&
+                                 ((ly == 8'd153) || (ly < 8'd143));
+    assign entering_vblank    = ce_gb && (dot_counter == 9'd455) && (ly == 8'd143);
+    assign irq_vblank         = entering_vblank;
 
     always @(posedge clk or posedge rst) begin
         if (rst) begin
