@@ -1,21 +1,10 @@
-// =============================================================================
-// Project      : GameBoy Emulator
-// File         : tb_joypad.v
-// Author       : Aaron Luebbert
-// Date         : 2026-09-14
-// Description  : directed testbench for joypad - select-bit write/readback,
-//                  direction group, button group, both groups selected at
-//                  once (AND behavior), neither selected, sel/ce gating,
-//                  and irq_joypad firing exactly on a press edge, not on
-//                  release and not while unselected
-// Revision     : 1.0 - initial implementation
-// =============================================================================
 `timescale 1ns / 1ps
 
 module tb_joypad;
 
     reg clk;
-    reg ce;
+    reg ce_gb;
+    reg ce_m;
     reg rst;
     reg [15:0] addr;
     reg [7:0]  data_in;
@@ -30,14 +19,15 @@ module tb_joypad;
     wire irq_joypad;
 
     initial clk = 1'b0;
-    always #5 clk = ~clk; // 100MHz, 10ns period
+    always #5 clk = ~clk;
 
     integer errors = 0;
     integer checks = 0;
 
     joypad dut (
         .clk        (clk),
-        .ce         (ce),
+        .ce_gb      (ce_gb),
+        .ce_m       (ce_m),
         .rst        (rst),
         .addr       (addr),
         .data_in    (data_in),
@@ -68,10 +58,8 @@ module tb_joypad;
 
     task check_read(input [7:0] expected, input [255:0] label);
         begin
-            @(negedge clk);
-            addr = 16'hFF00; we = 1'b0; sel = 1'b1;
-            @(posedge clk);
-            @(negedge clk);
+            sel = 1'b1;
+            #1;
             checks = checks + 1;
             if (data_out !== expected) begin
                 errors = errors + 1;
@@ -91,7 +79,9 @@ module tb_joypad;
     endtask
 
     initial begin
-        addr = 16'h0000; data_in = 8'h00; we = 1'b0; sel = 1'b0; ce = 1'b1;
+        addr = 16'h0000; data_in = 8'h00; we = 1'b0; sel = 1'b0;
+        ce_gb = 1'b1;
+        ce_m  = 1'b1;
         btn_right = 0; btn_left = 0; btn_up = 0; btn_down = 0;
         btn_a = 0; btn_b = 0; btn_select = 0; btn_start = 0;
 
@@ -100,24 +90,19 @@ module tb_joypad;
         @(negedge clk);
         rst = 1'b0;
 
-        // --- power-on, neither group selected, nibble reads all 1s ------
         check_read(8'hFF, "power-on, neither group selected");
 
-        // --- select directions (bit4=0, bit5=1), echo back --------------
         write_select(8'b0010_0000, "select directions");
         check_read(8'hEF, "directions selected, nothing pressed");
 
-        // --- press right, directions selected ----------------------------
         btn_right = 1;
         check_read(8'hEE, "right pressed, directions selected");
         btn_right = 0;
 
-        // --- press up+down together, directions selected ------------------
         btn_up = 1; btn_down = 1;
         check_read(8'hE3, "up+down pressed, directions selected");
         btn_up = 0; btn_down = 0;
 
-        // --- select buttons instead (bit5=0, bit4=1), echo back -----------
         write_select(8'b0001_0000, "select buttons");
         check_read(8'hDF, "buttons selected, nothing pressed");
 
@@ -125,20 +110,26 @@ module tb_joypad;
         check_read(8'hDE, "a pressed, buttons selected");
         btn_a = 0;
 
-        // --- both groups selected at once, result is the and of both -----
-        btn_right = 1; // direction bit 0
-        btn_b = 1;     // button bit 1
+        btn_right = 1;
+        btn_b = 1;
         write_select(8'b0000_0000, "select both groups");
-        // dir_bits = 1110 (right pressed), btn_bits = 1101 (b pressed)
-        // and = 1100 -> nibble = C
         check_read(8'hCC, "both groups selected, result is bitwise and");
         btn_right = 0; btn_b = 0;
 
-        // --- back to neither selected -------------------------------------
         write_select(8'b0011_0000, "select neither");
         check_read(8'hFF, "neither selected, reads all 1s regardless of buttons");
 
-        // --- sel gating: write ignored while sel low ------------------------
+        sel = 1'b0;
+        #1;
+        checks = checks + 1;
+        if (data_out === 8'h00)
+            $display("PASS data_out reads 0 when sel is low");
+        else begin
+            errors = errors + 1;
+            $display("FAIL data_out should read 0 when sel is low, got=%h", data_out);
+        end
+        sel = 1'b1;
+
         @(negedge clk);
         addr = 16'hFF00; data_in = 8'b0001_0000; we = 1'b1; sel = 1'b0;
         @(posedge clk);
@@ -146,31 +137,42 @@ module tb_joypad;
         we = 1'b0; sel = 1'b1;
         check_read(8'hFF, "select write ignored while sel low, still neither selected");
 
-        // --- ce gating: write ignored while ce low --------------------------
         @(negedge clk);
-        addr = 16'hFF00; data_in = 8'b0001_0000; we = 1'b1; sel = 1'b1; ce = 1'b0;
+        addr = 16'hFF00; data_in = 8'b0001_0000; we = 1'b1; sel = 1'b1; ce_m = 1'b0;
         @(posedge clk);
         @(negedge clk);
-        we = 1'b0; ce = 1'b1;
-        check_read(8'hFF, "select write ignored while ce low, still neither selected");
+        we = 1'b0; ce_m = 1'b1;
+        check_read(8'hFF, "select write ignored while ce_m low, still neither selected");
 
-        // --- irq: fires on a press edge while a group is selected -----------
         write_select(8'b0010_0000, "select directions for irq test");
         @(posedge clk); #1; check_irq(1'b0, "no irq before any press");
         btn_right = 1;
-        @(posedge clk); #1; check_irq(1'b1, "irq fires exactly on the press edge");
+        @(posedge clk); check_irq(1'b1, "irq fires exactly on the press edge");
         @(posedge clk); #1; check_irq(1'b0, "irq does not stay high the next cycle");
 
-        // --- irq: does not fire on release -----------------------------------
         btn_right = 0;
         @(posedge clk); #1; check_irq(1'b0, "no irq on release");
 
-        // --- irq: does not fire when neither group is selected ----------------
         write_select(8'b0011_0000, "select neither for irq test");
-        @(posedge clk); #1; // let nibble_prev settle to FF with neither selected
+        @(posedge clk); #1;
         btn_up = 1;
         @(posedge clk); #1; check_irq(1'b0, "no irq for a button in an unselected group");
         btn_up = 0;
+
+        write_select(8'b0010_0000, "select directions for ce_gb gating test");
+        @(posedge clk); #1;
+        ce_gb = 1'b0;
+        btn_left = 1;
+        #1;
+        checks = checks + 1;
+        if (irq_joypad === 1'b0)
+            $display("PASS irq_joypad does not strobe while ce_gb is low, even on a real press");
+        else begin
+            errors = errors + 1;
+            $display("FAIL irq_joypad should not strobe while ce_gb is low, got=%b", irq_joypad);
+        end
+        ce_gb = 1'b1;
+        btn_left = 0;
 
         if (errors == 0)
             $display("all %0d checks passed", checks);
