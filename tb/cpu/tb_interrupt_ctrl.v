@@ -159,7 +159,7 @@ module tb_interrupt_ctrl;
         #12 rst = 1'b0;
         @(posedge clk); #1;
 
-        // ---- Reset values ----------------------------------------------
+        // Reset values 
         $display("\n-- reset --");
         expect8("ie output after reset",           ie,     8'h00);
         expect8("if_reg output after reset",       if_reg, 8'h00);
@@ -168,14 +168,14 @@ module tb_interrupt_ctrl;
         bus_read(ADDR_IF);
         expect8("IF bus read after reset (E0)",    rd,     8'hE0);
 
-        // ---- IE stores all 8 bits ----------------------------------------
+        // IE stores all 8 bits
         $display("\n-- IE width --");
         bus_write(ADDR_IE, 8'hFF);
         expect8("ie output after writing FF",      ie,     8'hFF);
         bus_read(ADDR_IE);
         expect8("IE reads back FF, upper bits kept", rd,   8'hFF);
 
-        // ---- IF stores only 5 bits, two views ----------------------------
+        // IF stores only 5 bits, two views
         $display("\n-- IF width and views --");
         bus_write(ADDR_IF, 8'hFF);
         bus_read(ADDR_IF);
@@ -186,7 +186,7 @@ module tb_interrupt_ctrl;
         expect8("IF bus read after writing E0",    rd,     8'hE0);
         expect8("if_reg after writing E0 (00)",    if_reg, 8'h00);
 
-        // ---- Writes commit on ce_m only ----------------------------------
+        // Writes commit on ce_m only
         $display("\n-- write commit timing --");
         sel = 1'b1; we = 1'b1; addr = ADDR_IE; data_in = 8'h5A;
         tick(1, 0); tick(0, 0);
@@ -198,7 +198,7 @@ module tb_interrupt_ctrl;
         expect8("IE updated on ce_m",              ie,     8'h5A);
         bus_write(ADDR_IE, 8'h00);
 
-        // ---- Each request line sets its own bit ------------------------
+        // Each request line sets its own bit
         $display("\n-- request bit mapping --");
         bus_write(ADDR_IF, 8'h00);
         request(3'd0);
@@ -216,7 +216,7 @@ module tb_interrupt_ctrl;
         request(3'd4);
         expect8("irq_joypad sets bit 4",           if_reg, 8'h10);
 
-        // ---- Requests sampled on ce_gb only, and accumulate -------------
+        // Requests sampled on ce_gb only, and accumulate
         $display("\n-- request sampling --");
         bus_write(ADDR_IF, 8'h00);
         irq_timer = 1'b1;
@@ -228,7 +228,7 @@ module tb_interrupt_ctrl;
         request(3'd0);
         expect8("second request adds, keeps first", if_reg, 8'h05);
 
-        // ---- Acknowledge commits on ce_m only ----------------------------
+        // Acknowledge commits on ce_m only
         $display("\n-- acknowledge --");
         if_clear = 8'h04; if_clear_we = 1'b1;
         tick(1, 0); tick(0, 0);
@@ -237,7 +237,7 @@ module tb_interrupt_ctrl;
         if_clear_we = 1'b0; if_clear = 8'h00;
         expect8("ack clears only its bit on ce_m", if_reg, 8'h01);
 
-        // ---- Same-clock collisions: request wins -----------------------
+        // Same-clock collisions: request wins
         $display("\n-- collisions --");
         bus_write(ADDR_IF, 8'h04);
         sel = 1'b1; we = 1'b1; addr = ADDR_IF; data_in = 8'h00;
@@ -253,7 +253,7 @@ module tb_interrupt_ctrl;
         if_clear_we = 1'b0; if_clear = 8'h00; irq_timer = 1'b0;
         expect8("ack bit 2 + timer same clock",    if_reg, 8'h04);
 
-        // ---- Same-edge read: hardware update first, then the access -----
+        // Same-edge read: hardware update first, then the access
         $display("\n-- same-edge read --");
         bus_write(ADDR_IF, 8'h00);
         sel = 1'b1; we = 1'b0; addr = ADDR_IF;
@@ -265,7 +265,7 @@ module tb_interrupt_ctrl;
         ce_gb = 1'b0; ce_m = 1'b0; irq_timer = 1'b0; sel = 1'b0;
         expect8("bit is stored after the edge",    if_reg, 8'h04);
 
-        // ---- CPU view has no phantom bits --------------------------------
+        // CPU view has no phantom bits
         $display("\n-- CPU view --");
         bus_write(ADDR_IE, 8'hFF);
         bus_write(ADDR_IF, 8'h00);
@@ -275,7 +275,7 @@ module tb_interrupt_ctrl;
         bus_write(ADDR_IF, 8'h04);
         expect8("software request visible to CPU", ie & if_reg, 8'h04);
 
-        // ---- Accesses without sel are ignored ----------------------------
+        // Accesses without sel are ignored 
         $display("\n-- sel gating --");
         sel = 1'b0; we = 1'b1; addr = ADDR_IF; data_in = 8'h1F;
         tick(1, 1);
@@ -286,7 +286,7 @@ module tb_interrupt_ctrl;
         expect8("data_out is 00 when not selected", data_out, 8'h00);
         expect8("stall is always low",             {7'b0, stall}, 8'h00);
 
-        // ---- Summary -----------------------------------------------------
+        // Summary 
         $display("\n%0d checks, %0d failed.", checks, fails);
         if (fails == 0)
             $display("ALL INTERRUPT_CTRL CHECKS PASSED");

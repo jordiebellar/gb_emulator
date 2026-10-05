@@ -43,7 +43,7 @@ module tb_blargg;
     wire       ic_sel = (addr == 16'hFF0F) || (addr == 16'hFFFF);
     wire [7:0] tm_data_out;
     wire tm_irq;
-    wire tm_sel = (addr[15:2] == 14'h3FC1); // FF04-FC07 (TIMA, TMA, TAC)
+    wire tm_sel = (addr[15:2] == 14'h3FC1); // FF04-FC07 (DIV, TIMA, TMA, TAC)
 
     interrupt_ctrl ic (
         .clk(clk), .rst(rst), .ce_gb(ce_gb), .ce_m(ce_m),
