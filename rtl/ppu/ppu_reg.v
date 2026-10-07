@@ -31,11 +31,14 @@
 //                  it is gated by lcdc bit 7, since ly snaps to 0 when the
 //                  lcd is turned off and that must not raise an interrupt.
 //
-//                  lcdc, scx, scy, and bgp are exported for the rest of the
-//                  ppu. lcdc bit 7 is the lcd enable ppu_mode_fsm needs, scx
-//                  and scy feed the tile fetcher, and bgp is applied to each
-//                  pixel on its way out.
-// Revision     : 2.1 - exported bgp as bgp_out.
+//                  lcdc, scx, scy, wy, wx, and the three palettes bgp, obp0,
+//                  and obp1 are exported for the rest of the ppu. lcdc bit 7
+//                  is the lcd enable ppu_mode_fsm needs, scx and scy feed the
+//                  tile fetcher, wy and wx place the window, and the palettes
+//                  are applied to each pixel on its way out.
+// Revision     : 2.2 - exported obp0, obp1, wy, and wx as obp0_out,
+//                  obp1_out, wy_out, and wx_out.
+//                  2.1 - exported bgp as bgp_out.
 //                  2.0 - reads of ly and stat now use mode_next and ly_next.
 //                  the coincidence strobe is now same-edge, it used to land
 //                  one tick late through a coincidence_prev register, which
@@ -70,6 +73,10 @@ module ppu_reg (
     output wire [7:0]  scx_out,
     output wire [7:0]  scy_out,
     output wire [7:0]  bgp_out,
+    output wire [7:0]  obp0_out,
+    output wire [7:0]  obp1_out,
+    output wire [7:0]  wy_out,
+    output wire [7:0]  wx_out,
     output wire        irq_lcdstat
 );
 
@@ -94,6 +101,10 @@ module ppu_reg (
     assign scx_out  = scx;
     assign scy_out  = scy;
     assign bgp_out  = bgp;
+    assign obp0_out = obp0;
+    assign obp1_out = obp1;
+    assign wy_out   = wy;
+    assign wx_out   = wx;
     wire lcd_en = lcdc[7];
 
     always @(posedge clk or posedge rst) begin
