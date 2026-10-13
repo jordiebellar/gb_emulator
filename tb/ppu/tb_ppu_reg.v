@@ -8,7 +8,8 @@
 //                  stat's hybrid bits, irq_lcdstat for each of the four
 //                  trigger sources gated by its own enable bit, sel/ce_m
 //                  gating, data_out=0 when deselected, lcdc_out, scx_out,
-//                  scy_out, and bgp_out mirroring only committed writes.
+//                  scy_out, bgp_out, obp0_out, obp1_out, wy_out, and wx_out
+//                  mirroring only committed writes.
 //
 //                  the inputs ly_in, ly_next, and mode_next are driven the
 //                  way ppu_mode_fsm drives them: ly_in is the value now,
@@ -19,7 +20,8 @@
 //                  ly_next arriving at lyc or a write that sets lyc to the
 //                  current ly. it must not strobe while the match persists,
 //                  when it disappears, with ce_gb low, or with the lcd off.
-// Revision     : 2.1 - added bgp_out checks
+// Revision     : 2.2 - added obp0_out, obp1_out, wy_out, and wx_out checks
+//                  2.1 - added bgp_out checks
 //                  2.0 - next-state interface: reads from ly_next and
 //                  mode_next, same-edge coincidence strobe including the
 //                  lyc write case.
@@ -51,6 +53,10 @@ module tb_ppu_reg;
     wire [7:0] scx_out;
     wire [7:0] scy_out;
     wire [7:0] bgp_out;
+    wire [7:0] obp0_out;
+    wire [7:0] obp1_out;
+    wire [7:0] wy_out;
+    wire [7:0] wx_out;
     wire      irq_lcdstat;
 
     initial clk = 1'b0;
@@ -80,6 +86,10 @@ module tb_ppu_reg;
         .scx_out           (scx_out),
         .scy_out           (scy_out),
         .bgp_out           (bgp_out),
+        .obp0_out          (obp0_out),
+        .obp1_out          (obp1_out),
+        .wy_out            (wy_out),
+        .wx_out            (wx_out),
         .irq_lcdstat       (irq_lcdstat)
     );
 
@@ -164,6 +174,21 @@ module tb_ppu_reg;
         end
     endtask
 
+    task check_win_pal(input [7:0] e_obp0, input [7:0] e_obp1, input [7:0] e_wy, input [7:0] e_wx,
+                       input [8*100:1] label);
+        begin
+            #1;
+            checks = checks + 1;
+            if (obp0_out === e_obp0 && obp1_out === e_obp1 && wy_out === e_wy && wx_out === e_wx)
+                $display("PASS %0s: obp0=0x%02h obp1=0x%02h wy=0x%02h wx=0x%02h", label, obp0_out, obp1_out, wy_out, wx_out);
+            else begin
+                errors = errors + 1;
+                $display("FAIL %0s: expected obp0=%02h obp1=%02h wy=%02h wx=%02h got obp0=%02h obp1=%02h wy=%02h wx=%02h",
+                          label, e_obp0, e_obp1, e_wy, e_wx, obp0_out, obp1_out, wy_out, wx_out);
+            end
+        end
+    endtask
+
     initial begin
         addr = 16'h0000; data_in = 8'h00; we = 1'b0; sel = 1'b0;
         ce_gb = 1'b1; ce_m = 1'b1;
@@ -178,6 +203,7 @@ module tb_ppu_reg;
         // --- lcd is off at power-on -----------------------------------------
         check_lcdc_out(8'h00, "lcdc_out is 0 after reset, lcd off");
         check_bgp(8'h00, "bgp_out is 0 after reset");
+        check_win_pal(8'h00, 8'h00, 8'h00, 8'h00, "obp0, obp1, wy, and wx exports are 0 after reset");
 
         write_reg(16'hFF40, 8'h91); check_read(16'hFF40, 8'h91, "lcdc readback");
         check_lcdc_out(8'h91, "lcdc_out mirrors the written value");
@@ -191,9 +217,13 @@ module tb_ppu_reg;
         check_bgp(8'hE4, "bgp_out mirrors the written value");
         write_reg(16'hFF48, 8'hD0); check_read(16'hFF48, 8'hD0, "obp0 readback");
         check_bgp(8'hE4, "bgp_out unaffected by a write to obp0 next door");
+        check_win_pal(8'hD0, 8'h00, 8'h00, 8'h00, "obp0_out mirrors the write, the other three still at reset");
         write_reg(16'hFF49, 8'hC0); check_read(16'hFF49, 8'hC0, "obp1 readback");
+        check_win_pal(8'hD0, 8'hC0, 8'h00, 8'h00, "obp1_out mirrors the write, obp0 unaffected");
         write_reg(16'hFF4A, 8'h78); check_read(16'hFF4A, 8'h78, "wy readback");
+        check_win_pal(8'hD0, 8'hC0, 8'h78, 8'h00, "wy_out mirrors the write, the others unaffected");
         write_reg(16'hFF4B, 8'h9A); check_read(16'hFF4B, 8'h9A, "wx readback");
+        check_win_pal(8'hD0, 8'hC0, 8'h78, 8'h9A, "wx_out mirrors the write, the others unaffected");
 
         // --- ly: read-only, and a read returns the value after the edge ------
         set_ly(8'd42, 8'd42);
@@ -347,6 +377,20 @@ module tb_ppu_reg;
         @(negedge clk);
         we = 1'b0; ce_m = 1'b1;
         check_bgp(8'h1B, "bgp write ignored while ce_m low");
+
+        // the window and object palette exports follow only committed writes
+        @(negedge clk);
+        addr = 16'hFF4B; data_in = 8'h55; we = 1'b1; sel = 1'b0;
+        @(posedge clk);
+        @(negedge clk);
+        we = 1'b0; sel = 1'b1;
+        check_win_pal(8'hD0, 8'hC0, 8'h78, 8'h9A, "wx write ignored while sel low");
+        @(negedge clk);
+        addr = 16'hFF48; data_in = 8'h55; we = 1'b1; sel = 1'b1; ce_m = 1'b0;
+        @(posedge clk);
+        @(negedge clk);
+        we = 1'b0; ce_m = 1'b1;
+        check_win_pal(8'hD0, 8'hC0, 8'h78, 8'h9A, "obp0 write ignored while ce_m low");
 
         if (errors == 0)
             $display("all %0d checks passed", checks);

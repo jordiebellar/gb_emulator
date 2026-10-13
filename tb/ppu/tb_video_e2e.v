@@ -54,7 +54,6 @@ module tb_video_e2e;
     wire sel_ppu_vram, sel_ppu_oam, sel_ppu_reg, sel_oam_dma;
     wire sel_joypad, sel_serial, sel_timer, sel_interrupt_ctrl, sel_apu, sel_hram;
     wire [7:0] ppu_vram_data_out, ppu_oam_data_out, ppu_reg_data_out;
-    wire [7:0] oam_render_data;
 
     memory_map mm (
         .addr(addr), .data_out(cpu_wdata), .data_in(bus_rdata), .we(we),
@@ -89,7 +88,7 @@ module tb_video_e2e;
         .sel_ppu_oam(sel_ppu_oam),   .ppu_oam_data_out(ppu_oam_data_out),
         .sel_ppu_reg(sel_ppu_reg),   .ppu_reg_data_out(ppu_reg_data_out),
         .dma_active(1'b0),
-        .oam_render_addr(8'h00), .oam_render_data(oam_render_data),
+        .dma_we(1'b0), .dma_waddr(8'h00), .dma_wdata(8'h00),
         .pixel_valid(pixel_valid), .pixel_color(pixel_color),
         .pixel_shade(pixel_shade), .lcd_on(lcd_on),
         .pixel_x(pixel_x), .pixel_y(pixel_y),
@@ -239,6 +238,7 @@ module tb_video_e2e;
     integer frames_done, frames_bad, writes_this_frame, writes_off_screen;
     integer wi, bad_in_frame, waddr;
 
+    reg frame_mon;
     always @(posedge clk) begin
         // the framebuffer's own write enable, as the framebuffer sees it
         if (u_video.u_fb.we) begin
@@ -263,7 +263,6 @@ module tb_video_e2e;
             writes_this_frame = 0;
         end
     end
-    reg frame_mon;
 
     // --- the run ---------------------------------------------------------------------------
     integer i, a, x, nbad, nx, shown, r, c;

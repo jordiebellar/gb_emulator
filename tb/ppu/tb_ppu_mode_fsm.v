@@ -279,4 +279,69 @@ module tb_ppu_mode_fsm;
         // --- strobes are gated by lcd_en at the exact edges they would fire
         repeat (455) @(posedge clk);
         @(negedge clk);
-        check(dot_counter === 9'd455, "premise:
+        check(dot_counter === 9'd455, "premise: dot 455 of line 0, the edge that enters line 1");
+        check(entering_oam_scan === 1'b1, "lcd on: entering_oam_scan fires at dot 455 of line 0");
+        check(entering_hblank === 1'b0 && entering_vblank === 1'b0 && irq_vblank === 1'b0,
+              "lcd on: no other strobe fires there");
+        lcd_en = 1'b0;
+        #1;
+        check(entering_oam_scan === 1'b0, "lcd off: entering_oam_scan is gated at the edge it would fire");
+        lcd_en = 1'b1;
+        #1;
+        check(entering_oam_scan === 1'b1, "and it is back the moment lcd_en is");
+        @(posedge clk);
+        @(negedge clk);
+        check(ly === 8'd1 && dot_counter === 9'd0, "premise: line 1, dot 0");
+
+        // end of pixel transfer on line 1, the edge that enters hblank
+        repeat (80 + MODE3_LEN - 1) @(posedge clk);
+        @(negedge clk);
+        check(mode === MODE_PIXEL_TRANSFER && fifo_done === 1'b1, "premise: last tick of pixel transfer on line 1");
+        check(entering_hblank === 1'b1, "lcd on: entering_hblank fires on that tick");
+        // the fifo_done model above drops with the masked mode, so hold it
+        // high to show that lcd_en alone is what gates the strobe
+        force fifo_done = 1'b1;
+        lcd_en = 1'b0;
+        #1;
+        check(entering_hblank === 1'b0, "lcd off: entering_hblank is gated at the edge it would fire");
+        lcd_en = 1'b1;
+        #1;
+        release fifo_done;
+        #1;
+        check(entering_hblank === 1'b1, "and it is back the moment lcd_en is");
+        @(posedge clk);
+        @(negedge clk);
+        check(mode === MODE_HBLANK, "premise: hblank follows");
+
+        // end of line 143, the edge that enters vblank
+        repeat ((143 - 1) * 456 + (455 - (80 + MODE3_LEN))) @(posedge clk);
+        @(negedge clk);
+        check(ly === 8'd143 && dot_counter === 9'd455, "premise: dot 455 of line 143");
+        check(entering_vblank === 1'b1 && irq_vblank === 1'b1, "lcd on: entering_vblank and irq_vblank fire at the end of line 143");
+        lcd_en = 1'b0;
+        #1;
+        check(entering_vblank === 1'b0 && irq_vblank === 1'b0, "lcd off: both are gated at the edge they would fire");
+        lcd_en = 1'b1;
+        #1;
+        check(entering_vblank === 1'b1 && irq_vblank === 1'b1, "and they are back the moment lcd_en is");
+        @(posedge clk);
+        @(negedge clk);
+        check(mode === MODE_VBLANK && ly === 8'd144, "premise: vblank follows on line 144");
+
+        // --- the next-state monitor, over everything above
+        check(ns_checked > 60000, "monitor: next-state exports were compared on every edge");
+        check(ns_changes > 400, "monitor: and many of those edges changed mode or ly, so it is not vacuous");
+        check(ns_bad === 0, "monitor: mode_next and ly_next matched the registers on every edge");
+
+        $display("");
+        $display("next-state monitor: %0d edges compared, %0d changed mode or ly, %0d mismatched",
+                 ns_checked, ns_changes, ns_bad);
+        if (errors == 0)
+            $display("ALL %0d CHECKS PASSED - full frame timing, lcd enable, and next-state exports verified", checks);
+        else
+            $display("%0d of %0d checks failed", errors, checks);
+
+        $finish;
+    end
+
+endmodule

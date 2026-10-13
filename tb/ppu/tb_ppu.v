@@ -35,7 +35,11 @@
 //                  against lcdc bit 7.
 //                  every bus access goes through bus_master, which samples
 //                  reads on the ce_m edge the way the cpu does.
-// Revision     : 2.1 - checks pixel_shade through a reversed bgp, and
+// Revision     : 2.2 - the oam render port is gone from the ppu, so the
+//                  check that read through it is removed. the dma write
+//                  port is tied off. oam's own entry port is tested in
+//                  tb_oam.
+//                  2.1 - checks pixel_shade through a reversed bgp, and
 //                  lcd_on.
 //                  2.0 - bus accesses through bus_master, part e added, and
 //                    the lyc coincidence interrupt now checked on the exact
@@ -54,7 +58,6 @@ module tb_ppu;
     wire [7:0]  cpu_wdata;
     wire        we, bm_sel, bm_late;
     reg        dma_active;
-    reg [7:0]  oam_render_addr;
 
     // real enable relationship, one t-cycle per clock, ce_m every 4th
     reg [1:0] m_cnt;
@@ -80,7 +83,6 @@ module tb_ppu;
     wire sel_ppu_vram, sel_ppu_oam, sel_ppu_reg, sel_oam_dma;
     wire sel_joypad, sel_serial, sel_timer, sel_interrupt_ctrl, sel_apu, sel_hram;
     wire [7:0] ppu_vram_data_out, ppu_oam_data_out, ppu_reg_data_out;
-    wire [7:0] oam_render_data;
     wire       pixel_valid;
     wire [1:0] pixel_color;
     wire [1:0] pixel_shade;
@@ -113,7 +115,7 @@ module tb_ppu;
         .sel_ppu_oam(sel_ppu_oam),   .ppu_oam_data_out(ppu_oam_data_out),
         .sel_ppu_reg(sel_ppu_reg),   .ppu_reg_data_out(ppu_reg_data_out),
         .dma_active(dma_active),
-        .oam_render_addr(oam_render_addr),   .oam_render_data(oam_render_data),
+        .dma_we(1'b0), .dma_waddr(8'h00), .dma_wdata(8'h00),
         .pixel_valid(pixel_valid), .pixel_color(pixel_color),
         .pixel_shade(pixel_shade), .lcd_on(lcd_on),
         .pixel_x(pixel_x), .pixel_y(pixel_y),
@@ -237,7 +239,7 @@ module tb_ppu;
 
     initial begin
         dma_active = 1'b0;
-        oam_render_addr = 8'h00; pix_mon = 1'b0;
+        pix_mon = 1'b0;
         tick = 0; vb_n = 0; st_n = 0; mon_en = 1'b0; rd = 8'h00;
 
         rst = 1'b1;
@@ -332,10 +334,6 @@ module tb_ppu;
         check(rd === 8'hFF, "mode 3: vram read is blocked and returns $FF");
         bus_read(16'hFE00);
         check(rd === 8'hFF, "mode 3: oam read is blocked and returns $FF");
-
-        oam_render_addr  = 8'h00;
-        #1;
-        check(oam_render_data === 8'h01, "mode 3: the oam render port still reads oam[0], never blocked");
 
         bus_write(16'h8000, 8'hEE);
         wait_dot(300);
