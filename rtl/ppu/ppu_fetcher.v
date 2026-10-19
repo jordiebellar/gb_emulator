@@ -104,7 +104,11 @@
 //                    pixel inserted when lcdc bit 5 is cleared on a tile
 //                    edge, object fetch cancelling, objects with wx = 7
 //                    and window starting on the same pixel in hardware order
-// Revision     : 2.0 - window, sprites, and mixing added. the fifo is now
+// Revision     : 2.1 - the object list entry is read through a register so
+//                  the list mux is not in the same clock cycle as the object
+//                  trigger logic, this is what failed timing at 100 mhz.
+//                  behavior is unchanged.
+//                  2.0 - window, sprites, and mixing added. the fifo is now
 //                  the pan docs push-when-empty 8 pixel fifo with a dummy
 //                  first fetch, replacing the 16 pixel fifo with an 8 pixel
 //                  reserve, which could not flush and refill in the 6 dots
@@ -200,7 +204,17 @@ module ppu_fetcher (
     wire [12:0] data_hi   = data_lo + 13'd1;
 
     // --- the next object in the list ---------------------------------------
-    wire [31:0] sp_head = spr_list[32*sp_ptr +: 32];
+    // the list entry is read through a register that is loaded with the entry
+    // for the pointer value after this dot, so the big list mux is cut off
+    // from the object trigger logic. the list does not change during mode 3,
+    // so the entry is the same one the pointer would have selected directly
+    wire [3:0]  sp_ptr_nx = !active ? 4'd0 :
+                            (stalling && stall_cnt == 4'd0) ? sp_ptr + 4'd1 : sp_ptr;
+    reg  [31:0] sp_head;
+    always @(posedge clk or posedge rst) begin
+        if (rst)         sp_head <= 32'd0;
+        else if (ce_gb)  sp_head <= spr_list[32*sp_ptr_nx +: 32];
+    end
     wire [7:0]  sp_y    = sp_head[7:0];
     wire [7:0]  sp_x    = sp_head[15:8];
     wire [7:0]  sp_tile = sp_head[23:16];
