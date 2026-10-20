@@ -118,13 +118,29 @@ timer tm_i (
 );
 
 // Cartridge ROM
-(* rom_style = "block" *) reg [7:0] rom [0:32767];  // 32KB ROM
+// Cartridge ROM: 64 KB block RAM (4 banks of 16 KB), MBC1 ROM banking
+(* rom_style = "block" *) reg [7:0] rom [0:65535];  // 64KB ROM
 reg [7:0] rom_q;
+reg [4:0] rom_bank;                  // MBC1 ROM bank register (5 bits)
 
 initial $readmemh("rom.mem", rom);
 
+// MBC1: write to 2000-3FFF selects the bank; 0 is treated as 1
+wire bank_write = sel_rom && we && ce_m && (addr[14:13] == 2'b01);
+
+always @(posedge clk or posedge rst) begin
+    if (rst)
+        rom_bank <= 5'd1;            // Power-on: bank 1 at 4000-7FFF
+    else if (bank_write)
+        rom_bank <= (cpu_dout[4:0] == 5'd0) ? 5'd1 : cpu_dout[4:0];
+end
+
+// 0000-3FFF: bank 0. 4000-7FFF: selected bank, masked to 4 banks.
+wire [15:0] rom_addr = addr[14] ? {rom_bank[1:0], addr[13:0]}
+                                : {2'b00,         addr[13:0]};
+
 always @(posedge clk) begin
-    rom_q <= rom[addr[14:0]];
+    rom_q <= rom[rom_addr];
 end
 
 // WRAM
