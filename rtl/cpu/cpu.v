@@ -180,7 +180,7 @@ module cpu #(
     // CB Instruction Operand
     reg [7:0] cb_operand;
     // Determine the operand for CB instructions based on whether it's a memory read or a register read
-    always @(dst or mem_alu_read or mem_alu_data or a or b or c or d or e or h or l) begin
+    always @(*) begin
         if (mem_alu_read)
             cb_operand = mem_alu_data;
         else
@@ -197,7 +197,7 @@ module cpu #(
                 REG_E:  get_reg = e;
                 REG_H:  get_reg = h;
                 REG_L:  get_reg = l;
-                REG_HL: get_reg = data_in; // Memory read from HL address
+                REG_HL: get_reg = 8'h00; // Memory read from HL address
                 REG_A:  get_reg = a;
                 default: get_reg = 8'h00;
             endcase
@@ -302,6 +302,10 @@ module cpu #(
                             end
                             else begin
                                 pc <= pc + 1;          // Increment PC to point to next instruction
+                            end
+                            if (ime_pending) begin
+                                ime <= 1'b1;       // Set the interrupt master enable flag
+                                ime_pending <= 1'b0; // Clear the pending interrupt enable flag
                             end
                             fetch_ready <= 1'b0;   // Reset fetch ready for next cycle
                             state <= STATE_DECODE; // Move to decode state
@@ -1903,10 +1907,6 @@ module cpu #(
                 
                     endcase
 
-                    if(ime_pending) begin
-                        ime <= 1'b1;
-                        ime_pending <= 1'b0;
-                    end  
                 end
                 
                 // Handle stack operations

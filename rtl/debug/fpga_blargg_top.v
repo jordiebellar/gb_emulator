@@ -121,7 +121,7 @@ timer tm_i (
 (* rom_style = "block" *) reg [7:0] rom [0:32767];  // 32KB ROM
 reg [7:0] rom_q;
 
-initial $readmemh("rom.hex", rom);
+initial $readmemh("rom.mem", rom);
 
 always @(posedge clk) begin
     rom_q <= rom[addr[14:0]];
@@ -150,6 +150,120 @@ always @(posedge clk) begin
 end
 
 // Read mux back to CPU
-wire [7:0] ser_d
+wire [7:0] ser_dout; // Serail SB/SC read value
+
+// CPU data input mux
+assign cpu_din = sel_rom  ? rom_q  :
+                 sel_wram ? wram_q :
+                 sel_hram ? hram_q :
+                 sel_ic   ? ic_dout :
+                 sel_tm   ? tm_dout :
+                 (sel_sb || sel_sc) ? ser_dout :
+                 8'hFF;  // Default value for unmapped addresses
+
+// Serial port: SB (FF01), SC (FF02), internal clock, no cable attached
+reg [7:0] sb; // Serial data
+reg       sc_start; // SC bit 7: transfer in progress
+reg       sc_clk; // SC bit 0: internal clock
+reg [12:0] ser_cnt; // T-cycles left
+
+wire sb_write = sel_sb && we && ce_m;
+wire sc_write = sel_sc && we && ce_m;
+
+// Transfer finishes on this edge
+wire ser_done = sc_start && sc_clk && ce_gb && (ser_cnt == 13'd1);
+
+always @(posedge clk or posedge rst) begin
+    if (rst) begin
+        sb <= 8'h00;
+        sc_start <= 1'b0;
+        sc_clk <= 1'b0;
+        ser_cnt <= 13'd0;
+    end
+    else begin
+        // Hardware update first
+        if (ser_done) begin
+            sc_start <= 1'b0;
+            sb <= 8'hFF; // No cable: 1s shifted in
+        end
+        else if (sc_start && sc_clk && ce_gb) begin
+            ser_cnt <= ser_cnt - 13'd1;
+        end
+
+        // CPU access
+        if (sb_write) begin
+            sb <= cpu_dout;
+        end
+        if (sc_write) begin
+            sc_start <= cpu_dout[7];
+            sc_clk <= cpu_dout[0];
+            ser_cnt <= 13'd4096;
+        end
+    end
+end
+
+// Post edge reads
+wire sc_start_next = ser_done ? 1'b0 : sc_start;
+wire [7:0] sb_next = ser_done ? 8'hFF : sb;
+assign ser_dout = sel_sc ? {sc_start_next, 6'b111111, sc_clk} : sb_next;
+
+// Capture: each internal clock transfer's byte goes out the UART
+wire capture = sc_write && cpu_dout[7] && cpu_dout[0];
+
+reg [7:0] tx_byte;
+reg       tx_valid;
+wire      tx_ready;
+reg [47:0] tail;
+reg       passed;
+reg         failed;
+reg         activity;
+
+// UART transmission logic for captured serial bytes
+always @(posedge clk or posedge rst) begin
+    if (rst) begin
+        tx_byte  <= 8'h00;
+        tx_valid <= 1'b0;
+        tail     <= 48'h0;
+        passed   <= 1'b0;
+        failed   <= 1'b0;
+        activity <= 1'b0;
+    end
+    else begin
+        // Clear tx_valid if UART has taken the byte
+        if (tx_valid && tx_ready)
+            tx_valid <= 1'b0;
+        // Capture new byte if available
+        if (capture) begin
+            tx_byte  <= sb;
+            tx_valid <= 1'b1;
+            tail     <= {tail[39:0], sb};
+            activity <= ~activity;
+            if ({tail[39:0], sb} == "Passed")       passed <= 1'b1;
+            if ({tail[31:0], sb} == "ailed")        failed <= 1'b1;
+        end
+    end
+end
+
+// Instantiate UART transmitter for sending captured bytes
+uart_tx #(
+    .CLK_HZ(100_000_000), .BAUD(115_200)
+) uart_i (
+    .clk(clk), .rst(rst),
+    .data(tx_byte), .valid(tx_valid), .ready(tx_ready),
+    .tx(RsTx)
+);
+
+// LEDs
+reg [25:0] heartbeat;
+always @(posedge clk or posedge rst) begin
+    if (rst) heartbeat <= 26'd0;
+    else     heartbeat <= heartbeat + 26'd1;
+end
+
+assign led[15]   = passed;           // Test printed "Passed"
+assign led[14]   = failed;           // Test printed "Failed"
+assign led[13]   = activity;         // Toggles on every character
+assign led[12:1] = 12'h000;
+assign led[0]    = heartbeat[25];    // ~1.5 Hz: the design is running
 
 endmodule
