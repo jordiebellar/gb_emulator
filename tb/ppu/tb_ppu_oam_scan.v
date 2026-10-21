@@ -20,8 +20,11 @@
 //                  objects looked at so far, which is dot 2e for object e,
 //                  so the two dots per object timing is checked too. the
 //                  list is checked to hold through the clocks between ce_gb
-//                  and through mode 3, and to clear on the next scan.
-// Revision     : 1.0 - initial implementation
+//                  and through mode 3, and to clear on the next scan. blank,
+//                  which the ppu raises for the first line after lcd on,
+//                  must keep the count at 0 with no scan running.
+// Revision     : 1.1 - blank input, the first line after lcd on
+//                  1.0 - initial implementation
 // =============================================================================
 `timescale 1ns / 1ps
 
@@ -32,6 +35,7 @@ module tb_ppu_oam_scan;
     always #5 clk = ~clk;
 
     reg        rst, ce, scan_active, obj_tall, dma_active;
+    reg        blank = 1'b0;
     reg  [7:0] ly;
     wire [5:0] entry_idx;
     wire [31:0] entry_data;
@@ -47,7 +51,7 @@ module tb_ppu_oam_scan;
 
     ppu_oam_scan dut (
         .clk(clk), .ce_gb(ce), .rst(rst),
-        .scan_active(scan_active), .ly(ly), .obj_tall(obj_tall), .dma_active(dma_active),
+        .scan_active(scan_active), .blank(blank), .ly(ly), .obj_tall(obj_tall), .dma_active(dma_active),
         .entry_idx(entry_idx), .entry_data(entry_data),
         .list(list), .count(count)
     );
@@ -262,6 +266,19 @@ module tb_ppu_oam_scan;
         check(count === 4'd4, "dma starting on dot 8: objects 0 to 3 were seen, 4 to 7 were hidden");
         run_scan(40, 1'b0, 0, 0, 5);
         check(count === 4'd8, "the next scan with dma off picks all 8 again, the list was cleared and rebuilt");
+
+        // the first line after lcd on has no scan. blank keeps the count at 0
+        // whatever the last scan left, and the next scan is normal again
+        gap = 0;
+        blank = 1'b1; scan_active = 1'b0;
+        one_dot; #1;
+        check(count === 4'd0, "blank: the count drops to 0 on the next tick, the old objects are not drawn");
+        repeat (100) one_dot;
+        #1;
+        check(count === 4'd0, "blank: and stays 0 for the whole first line");
+        blank = 1'b0;
+        run_scan(40, 1'b0, 0, 0, 5);
+        check(count === 4'd8, "blank released: the next scan picks all 8 again");
 
         // ================= random =============================================
         for (s = 0; s < 600; s = s + 1) begin

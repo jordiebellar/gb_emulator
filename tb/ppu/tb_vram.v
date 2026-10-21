@@ -8,15 +8,21 @@
 //                  write and readback across the full 8kb range while
 //                  unblocked, back to back reads of different addresses
 //                  (the stale read regression), blocked reads returning
-//                  $FF and blocked writes being genuinely dropped during
-//                  mode 3, sel gating, a partial write that must not
+//                  $FF and blocked writes being genuinely dropped while
+//                  locked, sel gating, a partial write that must not
 //                  commit, data_out=0 when deselected, and the ppu-internal
-//                  render port working continuously regardless of mode.
-//                  the dut decides blocking from mode_next, the mode after
-//                  the edge. most accesses hold it steady. the transition
-//                  tests make it change in the last clock of an access, so
-//                  the mode flips exactly on the edge the access commits on.
-// Revision     : 3.0 - blocking tested against mode_next, with accesses
+//                  render port working continuously regardless of the lock.
+//                  vram has two lock inputs, blocked_next for reads and
+//                  wr_blocked_next for writes, because hardware locks writes
+//                  later than reads. each is tested alone, so a lock wired to
+//                  the wrong side shows up. the dut decides from the values
+//                  after the edge. most accesses hold them steady. the
+//                  transition tests make one change in the last clock of an
+//                  access, so the lock flips exactly on the edge the access
+//                  commits on.
+// Revision     : 4.0 - separate read and write lock inputs, replacing the
+//                  mode_next input.
+//                  3.0 - blocking tested against mode_next, with accesses
 //                  that land exactly on a mode transition edge.
 //                  2.0 - driven by bus_master with the real ce_m, added the
 //                  stale read regression and the partial write check.
@@ -35,22 +41,18 @@ module tb_vram;
     always @(posedge clk) m_cnt <= m_cnt + 2'd1;
     wire ce_m = (m_cnt == 2'd3);
 
-    localparam MODE_HBLANK         = 2'd0;
-    localparam MODE_VBLANK         = 2'd1;
-    localparam MODE_OAM_SCAN       = 2'd2;
-    localparam MODE_PIXEL_TRANSFER = 2'd3;
-
     wire [15:0] addr;
     wire [7:0]  wdata;
     wire        we, bm_sel;
     wire [7:0]  data_out;
     wire        stall;
     reg         sel_en;
-    reg  [1:0]  mode_before, mode_after;
+    reg         rl_before, rl_after, wl_before, wl_after;
     wire        late;
-    // mode_next is mode_before until the last clock of an access, then
-    // mode_after, which is what the cpu's edge sees
-    wire [1:0]  mode_next = late ? mode_after : mode_before;
+    // each lock is its before value until the last clock of an access, then
+    // its after value, which is what the cpu's edge sees
+    wire        rl_next = late ? rl_after : rl_before;
+    wire        wl_next = late ? wl_after : wl_before;
     reg  [12:0] render_addr;
     wire [7:0]  render_data;
 
@@ -60,12 +62,13 @@ module tb_vram;
     vram dut (
         .clk(clk), .ce_gb(1'b0), .ce_m(ce_m), .rst(1'b0),
         .addr(addr), .data_in(wdata), .we(we), .sel(bm_sel & sel_en),
-        .data_out(data_out), .stall(stall), .mode_next(mode_next),
+        .data_out(data_out), .stall(stall), .blocked_next(rl_next),
+        .wr_blocked_next(wl_next),
         .render_addr(render_addr), .render_data(render_data)
     );
 
-    task set_mode(input [1:0] m);
-        begin mode_before = m; mode_after = m; end
+    task set_lock(input r, input w);
+        begin rl_before = r; rl_after = r; wl_before = w; wl_after = w; end
     endtask
 
     integer errors = 0;
@@ -94,7 +97,7 @@ module tb_vram;
     endtask
 
     initial begin
-        sel_en = 1'b1; set_mode(MODE_HBLANK); render_addr = 13'h0000;
+        sel_en = 1'b1; set_lock(1'b0, 1'b0); render_addr = 13'h0000;
         repeat (3) @(posedge clk);
 
         bm.read(16'h8000);
@@ -115,41 +118,48 @@ module tb_vram;
         bm.read(16'h8701); check(bm.rd === 8'hA2, "back to back read 4 of 5, back to 0x8701");
         bm.read(16'h8700); check(bm.rd === 8'hA1, "back to back read 5 of 5, back to 0x8700");
 
-        // blocked during mode 3
-        set_mode(MODE_PIXEL_TRANSFER);
+        // both locks on, the way mode 3 leaves them
+        set_lock(1'b1, 1'b1);
         bm.read(16'h8000);
-        check(bm.rd === 8'hFF, "blocked read returns $FF during mode 3");
+        check(bm.rd === 8'hFF, "blocked read returns $FF while locked");
         bm.write(16'h8000, 8'hEE);
-        set_mode(MODE_HBLANK);
+        set_lock(1'b0, 1'b0);
         bm.read(16'h8000);
         check(bm.rd === 8'h11, "blocked write was genuinely dropped, original value intact");
 
-        set_mode(MODE_OAM_SCAN);
-        bm.read(16'h8500);
-        check(bm.rd === 8'h33, "oam scan does not block vram");
-        set_mode(MODE_VBLANK);
-        bm.read(16'h8500);
-        check(bm.rd === 8'h33, "vblank does not block vram");
-        set_mode(MODE_HBLANK);
+        // the two locks are independent. reads locked, writes open is the
+        // window just after the fetcher starts on hardware
+        set_lock(1'b1, 1'b0);
+        bm.write(16'h8030, 8'h77);
+        bm.read(16'h8030);
+        check(bm.rd === 8'hFF, "read lock alone blocks the read");
+        set_lock(1'b0, 1'b0);
+        bm.read(16'h8030);
+        check(bm.rd === 8'h77, "read lock alone does not block the write");
+        set_lock(1'b0, 1'b1);
+        bm.write(16'h8030, 8'h88);
+        bm.read(16'h8030);
+        check(bm.rd === 8'h77, "write lock alone does not block the read, and drops the write");
 
-        // accesses landing exactly on a mode transition edge are decided by
-        // the mode after that edge, not the mode before it
+        // accesses landing exactly on a lock edge are decided by the lock
+        // after that edge, not the lock before it
+        set_lock(1'b0, 1'b0);
         bm.write(16'h8020, 8'h6D);
-        mode_before = MODE_HBLANK; mode_after = MODE_PIXEL_TRANSFER;
+        wl_before = 1'b0; wl_after = 1'b1;
         bm.write(16'h8000, 8'hEE);
-        set_mode(MODE_HBLANK); bm.read(16'h8000);
-        check(bm.rd === 8'h11, "write on the edge that enters mode 3 is dropped");
-        mode_before = MODE_PIXEL_TRANSFER; mode_after = MODE_HBLANK;
+        set_lock(1'b0, 1'b0); bm.read(16'h8000);
+        check(bm.rd === 8'h11, "write on the edge that locks writes is dropped");
+        wl_before = 1'b1; wl_after = 1'b0;
         bm.write(16'h8010, 8'h5C);
-        set_mode(MODE_HBLANK); bm.read(16'h8010);
-        check(bm.rd === 8'h5C, "write on the edge that leaves mode 3 lands");
-        mode_before = MODE_HBLANK; mode_after = MODE_PIXEL_TRANSFER;
+        set_lock(1'b0, 1'b0); bm.read(16'h8010);
+        check(bm.rd === 8'h5C, "write on the edge that unlocks writes lands");
+        rl_before = 1'b0; rl_after = 1'b1;
         bm.read(16'h8020);
-        check(bm.rd === 8'hFF, "read on the edge that enters mode 3 returns $FF");
-        mode_before = MODE_PIXEL_TRANSFER; mode_after = MODE_HBLANK;
+        check(bm.rd === 8'hFF, "read on the edge that locks reads returns $FF");
+        rl_before = 1'b1; rl_after = 1'b0;
         bm.read(16'h8020);
-        check(bm.rd === 8'h6D, "read on the edge that leaves mode 3 returns the data");
-        set_mode(MODE_HBLANK);
+        check(bm.rd === 8'h6D, "read on the edge that unlocks reads returns the data");
+        set_lock(1'b0, 1'b0);
 
         // sel gating and the partial write
         bm.write(16'h8600, 8'h44);
@@ -166,13 +176,13 @@ module tb_vram;
         // render port, never blocked
         check_render(13'h0000, 8'h11, "render port reads addr 0x0000 (0x8000)");
         check_render(13'h1FFF, 8'h22, "render port reads addr 0x1FFF (0x9FFF)");
-        set_mode(MODE_PIXEL_TRANSFER);
-        check_render(13'h0500, 8'h33, "render port still works during mode 3, only the cpu is blocked");
-        set_mode(MODE_HBLANK);
+        set_lock(1'b1, 1'b1);
+        check_render(13'h0500, 8'h33, "render port still works while locked, only the cpu is blocked");
+        set_lock(1'b0, 1'b0);
 
         if (errors == 0) $display("all %0d checks passed", checks);
         else             $display("%0d of %0d checks failed", errors, checks);
         $finish;
     end
 
-endmodule
+endmodule

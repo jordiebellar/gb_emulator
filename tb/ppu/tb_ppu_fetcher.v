@@ -89,7 +89,7 @@ module tb_ppu_fetcher;
         .clk(clk), .ce_gb(1'b1), .rst(rst), .lcd_en(lcd_en),
         .fifo_done(line_done),
         .mode(mode), .dot_counter(dot_counter), .ly(ly),
-        .oam_stall(), .vram_stall(),
+
         .entering_hblank(), .entering_oam_scan(), .entering_vblank(),
         .irq_vblank()
     );
@@ -284,4 +284,4 @@ module tb_ppu_fetcher;
         $finish;
     end
 
-endmodule
+endmodule

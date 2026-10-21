@@ -39,7 +39,8 @@ module vram (
     output wire [7:0]  data_out,
     output wire        stall,
 
-    input  wire [1:0]  mode_next, // mode after this edge, from ppu_mode_fsm
+    input  wire        blocked_next,    // reads locked after this edge, from ppu_mode_fsm
+    input  wire        wr_blocked_next, // writes locked after this edge
 
     // ppu-internal read port, always live, never blocked
     input  wire [12:0] render_addr,
@@ -48,8 +49,7 @@ module vram (
 
     assign stall = 1'b0;
 
-    localparam MODE_PIXEL_TRANSFER = 2'd3;
-    wire blocked = (mode_next == MODE_PIXEL_TRANSFER);
+    wire blocked = blocked_next;
 
     reg [7:0] mem [0:8191];
     reg [7:0] rdata;
@@ -63,7 +63,7 @@ module vram (
 
     // a write attempted while blocked is genuinely dropped, not queued
     always @(posedge clk) begin
-        if (sel && we && ce_m && !blocked)
+        if (sel && we && ce_m && !wr_blocked_next)
             mem[addr[12:0]] <= data_in;
     end
 
@@ -78,4 +78,4 @@ module vram (
     // ppu-internal port, plain combinational read, no blocking
     assign render_data = mem[render_addr];
 
-endmodule
+endmodule

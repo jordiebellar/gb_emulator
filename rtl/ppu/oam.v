@@ -47,7 +47,8 @@ module oam (
     output wire [7:0]  data_out,
     output wire        stall,
 
-    input  wire [1:0]  mode_next, // mode after this edge, from ppu_mode_fsm
+    input  wire        blocked_next,    // reads locked by the ppu after this edge, from ppu_mode_fsm
+    input  wire        wr_blocked_next, // writes locked by the ppu after this edge
     input  wire        dma_active, // from the oam dma unit, high for the whole transfer
 
     // ppu-internal entry port for the oam scan, always live, never blocked
@@ -62,9 +63,8 @@ module oam (
 
     assign stall = 1'b0;
 
-    localparam MODE_OAM_SCAN       = 2'd2;
-    localparam MODE_PIXEL_TRANSFER = 2'd3;
-    wire blocked = (mode_next == MODE_OAM_SCAN) || (mode_next == MODE_PIXEL_TRANSFER) || dma_active;
+    wire blocked  = blocked_next || dma_active;
+    wire wblocked = wr_blocked_next || dma_active;
 
     reg [7:0] mem [0:159];
     reg [7:0] rdata;
@@ -81,7 +81,7 @@ module oam (
     always @(posedge clk) begin
         if (dma_we && (dma_waddr < 8'd160))
             mem[dma_waddr] <= dma_wdata;
-        else if (sel && we && ce_m && !blocked)
+        else if (sel && we && ce_m && !wblocked)
             mem[addr[7:0]] <= data_in;
     end
 
@@ -98,4 +98,4 @@ module oam (
                                     mem[entry_base + 8'd1], mem[entry_base]}
                                  : 32'hFFFF_FFFF;
 
-endmodule
+endmodule
