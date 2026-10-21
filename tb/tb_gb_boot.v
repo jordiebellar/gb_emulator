@@ -177,7 +177,7 @@ module tb_gb_boot;
     reg trace = 1'b0;
     initial begin #1; if ($test$plusargs("trace")) trace = 1'b1; end
     always @(posedge clk)
-        if (trace && !rst && dut.ce_m && (a == 16'hFF41 || a == 16'hFF44 || a == 16'hFF0F || a == 16'hFF40) )
+        if (trace && !rst && dut.ce_m && (a == 16'hFF41 || a == 16'hFF44 || a == 16'hFF0F || a == 16'hFF40 || a == 16'hFF45) )
             $display("t=%0t %s %h addr=%h data=%h ly=%0d dot=%0d mode=%0d", $time, we ? "W" : "R", we ? d : din, a, d, dut.u_ppu.ly, dut.u_ppu.dot_counter, dut.u_ppu.mode);
 
     always @(posedge clk) begin

@@ -114,6 +114,7 @@ module ppu (
     wire [7:0]  ly_next;
     wire [1:0]  stat_mode_next;
     wire [7:0]  ly_cpu_next;
+    wire [7:0]  ly_cmp_next;
     wire        cmp_off_next;
     wire        oam_blocked_next;
     wire        vram_blocked_next;
@@ -168,6 +169,7 @@ module ppu (
         .ly_next           (ly_next),
         .stat_mode_next    (stat_mode_next),
         .ly_cpu_next       (ly_cpu_next),
+        .ly_cmp_next       (ly_cmp_next),
         .cmp_off_next      (cmp_off_next),
         .oam_blocked_next  (oam_blocked_next),
         .vram_blocked_next (vram_blocked_next),
@@ -236,6 +238,7 @@ module ppu (
         .stall             (),
         .stat_mode_next    (stat_mode_next),
         .ly_cpu_next       (ly_cpu_next),
+        .ly_cmp_next       (ly_cmp_next),
         .cmp_off_next      (cmp_off_next),
         .term_m0_next      (term_m0_next),
         .term_m1_next      (term_m1_next),

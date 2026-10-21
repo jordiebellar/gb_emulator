@@ -33,13 +33,19 @@
 //                                     and mode 3 shows 4 dots after the
 //                                     fetcher starts. the end of mode 3 is
 //                                     the exception, mode 0 shows only 1 dot
-//                                     after the fetcher finishes
+//                                     after the fetcher finishes. the first
+//                                     4 dots of line 0 show mode 0 where the
+//                                     delay would still show vblank
 //                    ly_cpu_next      ly as read. line 153 reads 153 for
-//                                     only its first 8 engine dots and 0
+//                                     only its first 4 engine dots and 0
 //                                     for the rest of the line
+//                    ly_cmp_next      ly as the ly == lyc comparison sees
+//                                     it. the same, except that line 153
+//                                     holds its 153 for 8 engine dots
 //                    cmp_off_next     high for the first 4 engine dots of a
 //                                     line, where the ly == lyc comparison is
-//                                     held false
+//                                     held false. line 153 also holds it for
+//                                     dots 8 to 11, between seeing 153 and 0
 //                    oam_blocked_next oam is locked from the start of mode 2
 //                                     until stat shows mode 0
 //                    vram_blocked_next vram is locked from the moment the
@@ -86,7 +92,10 @@
 //                  engine dots long because the engine counts from 4, so the
 //                  next line becomes visible 456 dots after the lcdc write
 //                  like every other line.
-// Revision     : 4.0 - cpu views added, the engine dot counter starts at 4
+// Revision     : 4.1 - stat reads mode 0 for the first 4 dots of line 0, ly
+//                    and the comparison get separate line 153 views, and the
+//                    comparison pauses for 4 dots between 153 and 0
+//                  4.0 - cpu views added, the engine dot counter starts at 4
 //                  and the first line after lcd on has no mode 2. mode, ly
 //                  and their next-state versions are unchanged for lines
 //                  other than the first one.
@@ -113,6 +122,7 @@ module ppu_mode_fsm (
     // what the cpu sees, all after this edge
     output wire [1:0] stat_mode_next,
     output wire [7:0] ly_cpu_next,
+    output wire [7:0] ly_cmp_next,
     output wire       cmp_off_next,
     output wire       oam_blocked_next,      // oam reads
     output wire       vram_blocked_next,     // vram reads
@@ -223,12 +233,19 @@ module ppu_mode_fsm (
     // between edges nothing moves, so it is m_d4 and m_d1
     wire [1:0] mode_d4_n   = ce_gb ? m_d3 : m_d4;
     wire [1:0] mode_d1_n   = ce_gb ? mode_r : m_d1;
-    wire [1:0] stat_mode_n = (mode_d4_n == MODE_PIXEL_TRANSFER) ? mode_d1_n : mode_d4_n;
+    // the first 4 dots of line 0 show mode 0 where the delay would still
+    // show vblank
+    wire [1:0] stat_mode_n = (mode_d4_n == MODE_PIXEL_TRANSFER) ? mode_d1_n :
+                             (mode_d4_n == MODE_VBLANK && ly_n == 8'd0) ? MODE_HBLANK :
+                              mode_d4_n;
 
     assign stat_mode_next   = lcd_en ? stat_mode_n : MODE_HBLANK;
     assign ly_cpu_next      = !lcd_en ? 8'd0 :
+                               ((ly_n == 8'd153 && dot_n >= 9'd4) ? 8'd0 : ly_n);
+    assign ly_cmp_next      = !lcd_en ? 8'd0 :
                                ((ly_n == 8'd153 && dot_n >= 9'd8) ? 8'd0 : ly_n);
-    assign cmp_off_next     = lcd_en && (dot_n < 9'd4);
+    assign cmp_off_next     = lcd_en && (dot_n < 9'd4 ||
+                                         (ly_n == 8'd153 && dot_n >= 9'd8 && dot_n < 9'd12));
 
     // the locks start with the engine and end with the stat mode, so they
     // cover the dots where the engine is ahead of the stat mode. on the

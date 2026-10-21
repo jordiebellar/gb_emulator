@@ -35,7 +35,9 @@
 //                  lcd enable, which masks every export at once, restarts at
 //                  line 0 with a first line, and gates the strobes at the
 //                  exact edges where they would otherwise fire.
-// Revision     : 4.0 - rewritten for ppu_mode_fsm 4.0. golden model of the
+// Revision     : 4.1 - golden model follows ppu_mode_fsm 4.1, line 0 mode 0,
+//                    ly_cmp_next and the line 153 comparison pause
+//                  4.0 - rewritten for ppu_mode_fsm 4.0. golden model of the
 //                  cpu views, first line, and engine dot 4 idle.
 //                  3.0 - added the mode_next and ly_next monitor
 //                  2.3 - added lcd_en and the part 2 checks
@@ -62,6 +64,7 @@ module tb_ppu_mode_fsm;
     wire [7:0] ly_next;
     wire [1:0] stat_mode_next;
     wire [7:0] ly_cpu_next;
+    wire [7:0] ly_cmp_next;
     wire       cmp_off_next;
     wire       oam_blocked_next;
     wire       vram_blocked_next;
@@ -96,6 +99,7 @@ module tb_ppu_mode_fsm;
         .ly_next              (ly_next),
         .stat_mode_next       (stat_mode_next),
         .ly_cpu_next          (ly_cpu_next),
+        .ly_cmp_next          (ly_cmp_next),
         .cmp_off_next         (cmp_off_next),
         .oam_blocked_next     (oam_blocked_next),
         .vram_blocked_next    (vram_blocked_next),
@@ -171,22 +175,31 @@ module tb_ppu_mode_fsm;
     endfunction
 
     // the stat mode is the engine mode 4 dots late, and the end of mode 3
-    // shows after 1
+    // shows after 1. the first 4 dots of line 0 show mode 0 where the delay
+    // would still show vblank
     function [1:0] g_stat(input integer t);
         begin
-            g_stat = (g_eng(t - 4) == MODE_PIXEL_TRANSFER) ? g_eng(t - 1) : g_eng(t - 4);
+            if (g_eng(t - 4) == MODE_PIXEL_TRANSFER) g_stat = g_eng(t - 1);
+            else if (g_eng(t - 4) == MODE_VBLANK && g_ly(t) == 8'd0) g_stat = MODE_HBLANK;
+            else g_stat = g_eng(t - 4);
         end
     endfunction
 
     function [7:0] g_lyc(input integer t);   // ly as the cpu reads it
         begin
-            g_lyc = (g_ly(t) == 153 && g_dot(t) >= 8) ? 8'd0 : g_ly(t);
+            g_lyc = (g_ly(t) == 153 && g_dot(t) >= 4) ? 8'd0 : g_ly(t);
+        end
+    endfunction
+
+    function [7:0] g_lycmp(input integer t);   // ly as the comparison sees it
+        begin
+            g_lycmp = (g_ly(t) == 153 && g_dot(t) >= 8) ? 8'd0 : g_ly(t);
         end
     endfunction
 
     function g_cmp_off(input integer t);
         begin
-            g_cmp_off = (g_dot(t) < 4);
+            g_cmp_off = (g_dot(t) < 4) || (g_ly(t) == 153 && g_dot(t) >= 8 && g_dot(t) < 12);
         end
     endfunction
 
@@ -286,6 +299,7 @@ module tb_ppu_mode_fsm;
                 ta = ce_gb ? tcount + 1 : tcount;
                 if (stat_mode_next !== g_stat(ta))      mismatch("stat mode");
                 if (ly_cpu_next !== g_lyc(ta))          mismatch("ly");
+                if (ly_cmp_next !== g_lycmp(ta))        mismatch("ly for the comparison");
                 if (cmp_off_next !== g_cmp_off(ta))     mismatch("compare hold");
                 if (oam_blocked_next !== g_oam_rd(ta))  mismatch("oam read lock");
                 if (vram_blocked_next !== g_vram_rd(ta)) mismatch("vram read lock");
@@ -306,7 +320,7 @@ module tb_ppu_mode_fsm;
                 if (irq_vblank        !== exp_vb)  mismatch("irq_vblank");
                 if (win_check !== g_win(tcount))   mismatch("win_check");
                 if (first_line !== g_first(tcount)) mismatch("first_line");
-                if (ta != tcount && (g_stat(ta) !== g_stat(tcount) || g_lyc(ta) !== g_lyc(tcount))) mon_moves = mon_moves + 1;
+                if (ta != tcount && (g_stat(ta) !== g_stat(tcount) || g_lyc(ta) !== g_lyc(tcount) || g_lycmp(ta) !== g_lycmp(tcount))) mon_moves = mon_moves + 1;
                 tcount = ta;
             end
             mon_checked = mon_checked + 1;

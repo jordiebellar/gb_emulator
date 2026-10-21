@@ -49,7 +49,9 @@
 //                  is the lcd enable ppu_mode_fsm needs, scx and scy feed the
 //                  tile fetcher, wy and wx place the window, and the palettes
 //                  are applied to each pixel on its way out.
-// Revision     : 3.0 - the stat interrupt is now an edge on the or of the
+// Revision     : 3.1 - ly_cmp_next added for the comparison, and a lyc write on
+//                    the edge a match arrives no longer takes the interrupt back
+//                  3.0 - the stat interrupt is now an edge on the or of the
 //                  four enabled conditions instead of four separate strobes,
 //                  so stat blocking works. the coincidence flag is a register
 //                  with the rules above. stat mode and ly come from the cpu
@@ -80,6 +82,7 @@ module ppu_reg (
     // what the cpu sees after this edge, from ppu_mode_fsm
     input  wire [1:0]  stat_mode_next,
     input  wire [7:0]  ly_cpu_next,
+    input  wire [7:0]  ly_cmp_next,
     input  wire        cmp_off_next,
     input  wire        term_m0_next,
     input  wire        term_m1_next,
@@ -169,7 +172,7 @@ module ppu_reg (
     // updated by anything, lyc writes included
     reg  coincidence_r;
     wire coincidence_next = !lcd_en ? coincidence_r :
-                             (cmp_off_next ? 1'b0 : (ly_cpu_next == lyc_next));
+                             (cmp_off_next ? 1'b0 : (ly_cmp_next == lyc_next));
 
     always @(posedge clk or posedge rst) begin
         if (rst) coincidence_r <= 1'b1;   // ly 0 == lyc 0 at power-on
@@ -217,6 +220,16 @@ module ppu_reg (
         else if (ce_gb) stat_line_r <= stat_line_n;
     end
 
-    assign irq_lcdstat = ce_gb && stat_line_n && !stat_line_r;
+    // a lyc write on the same edge as the comparison turning on does not
+    // take the interrupt back. the comparison turns on with the old lyc
+    // first, which raises the line for an instant, then the write lands
+    wire coincidence_old = !lcd_en ? coincidence_r :
+                            (cmp_off_next ? 1'b0 : (ly_cmp_next == lyc));
+    wire stat_line_old   = (m0_ie_n  && term_m0_next) ||
+                           (m1_ie_n  && term_m1_next) ||
+                           (m2_ie_n  && term_m2_next) ||
+                           (lyc_ie_n && coincidence_old);
+
+    assign irq_lcdstat = ce_gb && (stat_line_n || stat_line_old) && !stat_line_r;
 
 endmodule

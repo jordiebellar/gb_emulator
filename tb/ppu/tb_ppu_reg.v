@@ -30,7 +30,8 @@
 //                  already holds is itself a rising edge, on the edge of the
 //                  stat write. with the lcd off the mode conditions are low
 //                  but a set coincidence flag keeps the line up.
-// Revision     : 3.0 - rewritten for ppu_reg 3.0. the line is an edge on the
+// Revision     : 3.1 - ly_cmp_next checks and the late lyc write strobe
+//                  3.0 - rewritten for ppu_reg 3.0. the line is an edge on the
 //                  or of the enabled conditions, the coincidence flag is a
 //                  register with freeze and compare-off rules, and stat mode
 //                  and ly come from the cpu views.
@@ -59,6 +60,7 @@ module tb_ppu_reg;
 
     reg [1:0] stat_mode_next;
     reg [7:0] ly_cpu_next;
+    reg [7:0] ly_cmp_next;
     reg       cmp_off_next;
     reg       term_m0_next;
     reg       term_m1_next;
@@ -92,6 +94,7 @@ module tb_ppu_reg;
         .stall             (stall),
         .stat_mode_next    (stat_mode_next),
         .ly_cpu_next       (ly_cpu_next),
+        .ly_cmp_next       (ly_cmp_next),
         .cmp_off_next      (cmp_off_next),
         .term_m0_next      (term_m0_next),
         .term_m1_next      (term_m1_next),
@@ -108,7 +111,7 @@ module tb_ppu_reg;
     );
 
     task set_ly(input [7:0] nxt);
-        begin ly_cpu_next = nxt; end
+        begin ly_cpu_next = nxt; ly_cmp_next = nxt; end
     endtask
 
     // one full clock, ce_gb as it stands. the registers settle on it
@@ -292,6 +295,21 @@ module tb_ppu_reg;
         check_read(16'hFF41, 8'b1000_0000, "stat: lyc 77, ly 20, no match");
         write_reg(16'hFF45, 8'd20);
         check_read(16'hFF41, 8'b1000_0100, "stat: a lyc write that makes the match sets the flag");
+
+        // --- the comparison has its own ly view --------------------------------
+        // line 153 reads 0 sooner than the comparison stops seeing 153. the
+        // ly register follows ly_cpu_next and the flag follows ly_cmp_next
+        stat_mode_next = 2'd1;
+        write_reg(16'hFF45, 8'd153);
+        ly_cpu_next = 8'd0; ly_cmp_next = 8'd153;
+        check_read(16'hFF44, 8'd0, "ly register follows the cpu view while the comparison still sees 153");
+        check_read(16'hFF41, 8'b1000_0101, "flag follows the comparison view, lyc 153 still matches");
+        ly_cpu_next = 8'd0; ly_cmp_next = 8'd0;
+        check_read(16'hFF41, 8'b1000_0001, "flag clears when the comparison view moves on to 0");
+        write_reg(16'hFF45, 8'd0);
+        check_read(16'hFF41, 8'b1000_0101, "lyc 0 matches once the comparison view reads 0");
+        write_reg(16'hFF45, 8'd99);
+        stat_mode_next = 2'd0; set_ly(8'd20);
 
         // --- the flag is frozen while the lcd is off --------------------------
         set_ly(8'd20);
@@ -478,6 +496,24 @@ module tb_ppu_reg;
         tick;
         we = 1'b0;
         check_irq(1'b0, "coincidence: and it does not strobe again once the write has landed");
+
+        // a write to lyc on the very edge the match arrives does not take
+        // the interrupt back. the old lyc matched first, the write only
+        // clears the flag afterwards
+        write_reg(16'hFF45, 8'd50);
+        set_ly(8'd20);
+        tick;
+        check_irq(1'b0, "late write: lyc 50, ly 20, no match yet");
+        @(negedge clk);
+        addr = 16'hFF45; data_in = 8'd77; we = 1'b1; sel = 1'b1;
+        set_ly(8'd50);
+        check_irq(1'b1, "late write: ly arrives at the old lyc as lyc moves away, the strobe stands");
+        tick;
+        we = 1'b0;
+        check_irq(1'b0, "late write: and no second strobe after the write lands");
+        check_read(16'hFF41, 8'b1100_0000, "late write: the flag itself follows the new lyc and is clear");
+        set_ly(8'd20);
+        tick;
 
         // a write to some other peripheral whose address also ends in 5, the
         // timer's tima at 0xFF05 for one, must not be mistaken for a lyc write
