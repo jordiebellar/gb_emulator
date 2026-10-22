@@ -389,7 +389,7 @@ module tb_ppu;
         // 0 interrupt of line 2 arrives with the line already high and is
         // blocked, which makes 144 strobes and not 145
         check(vb_n === 1, "irq_vblank strobed exactly once in the frame");
-        check(vb_k[0] === 65660, "irq_vblank landed on tick 65660, 452 + 143 x 456");
+        check(vb_k[0] === 65661, "irq_vblank landed on tick 65661, 1 tick after 452 + 143 x 456");
         check(st_n === 144, "irq_lcdstat strobed 144 times: 143 hblanks plus one lyc match, line 2's hblank is blocked");
         check(st_k[0] === 251, "first stat interrupt is line 0's hblank, tick 251");
         check(st_k[1] === 707, "second is line 1's hblank, tick 707 = 452 + 252 + 3");

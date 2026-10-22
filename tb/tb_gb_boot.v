@@ -41,7 +41,8 @@
 //                                 is b,c,d,e,h,l = 3,5,8,13,21,34 and fail is
 //                                 all 0x42. frames is the time limit
 //                  the last frame is always written as frames/frame_last.pgm
-// Revision     : 1.2 - mooneye verdict
+// Revision     : 1.3 - prints the timer counter when the boot rom unmaps
+//                  1.2 - mooneye verdict
 //                  1.1 - plus arguments, stand in boot rom, frame_last
 //                  1.0 - initial implementation
 // =============================================================================
@@ -184,7 +185,7 @@ module tb_gb_boot;
         boot_d <= rst ? 1'b1 : dut.u_cartridge.boot_active;
         if (!rst && boot_d && !dut.u_cartridge.boot_active) begin
             boot_frame = frame;
-            $display("boot rom unmapped at frame %0d, time %0t", frame, $time);
+            $display("boot rom unmapped at frame %0d, time %0t, sys_cnt %h", frame, $time, dut.u_timer.sys_cnt);
         end
         if (dut.irq_vblank && dut.ce_gb) begin
             frame = frame + 1;
