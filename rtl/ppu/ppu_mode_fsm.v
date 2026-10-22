@@ -44,8 +44,10 @@
 //                                     holds its 153 for 8 engine dots
 //                    cmp_off_next     high for the first 4 engine dots of a
 //                                     line, where the ly == lyc comparison is
-//                                     held false. line 153 also holds it for
-//                                     dots 8 to 11, between seeing 153 and 0
+//                                     held false, except on line 0 where ly
+//                                     never changed after 153. line 153 also
+//                                     holds it for dots 8 to 11, between
+//                                     seeing 153 and 0
 //                    oam_blocked_next oam is locked from the start of mode 2
 //                                     until stat shows mode 0
 //                    vram_blocked_next vram is locked from the moment the
@@ -62,7 +64,9 @@
 //                                     the three mode conditions that feed the
 //                                     stat interrupt line, as levels. ppu_reg
 //                                     ands them with the enable bits and
-//                                     watches the or for a rising edge
+//                                     watches the or for a rising edge. the
+//                                     mode 2 one is only up for the first 4
+//                                     dots of a scan, and of line 144
 //
 //                  first_line says the line is the first after lcd on, the oam
 //                  scan uses it to keep its object list empty. win_check is
@@ -92,7 +96,10 @@
 //                  engine dots long because the engine counts from 4, so the
 //                  next line becomes visible 456 dots after the lcdc write
 //                  like every other line.
-// Revision     : 4.1 - stat reads mode 0 for the first 4 dots of line 0, ly
+// Revision     : 4.2 - the mode 2 interrupt condition is a 4 dot pulse at the start
+//                    of the line, not a level for the whole scan
+//                    the compare hold is skipped on line 0, where ly did not change
+//                  4.1 - stat reads mode 0 for the first 4 dots of line 0, ly
 //                    and the comparison get separate line 153 views, and the
 //                    comparison pauses for 4 dots between 153 and 0
 //                  4.0 - cpu views added, the engine dot counter starts at 4
@@ -244,7 +251,7 @@ module ppu_mode_fsm (
                                ((ly_n == 8'd153 && dot_n >= 9'd4) ? 8'd0 : ly_n);
     assign ly_cmp_next      = !lcd_en ? 8'd0 :
                                ((ly_n == 8'd153 && dot_n >= 9'd8) ? 8'd0 : ly_n);
-    assign cmp_off_next     = lcd_en && (dot_n < 9'd4 ||
+    assign cmp_off_next     = lcd_en && ((dot_n < 9'd4 && ly_n != 8'd0) ||
                                          (ly_n == 8'd153 && dot_n >= 9'd8 && dot_n < 9'd12));
 
     // the locks start with the engine and end with the stat mode, so they
@@ -273,9 +280,9 @@ module ppu_mode_fsm (
                            (mode_d3_n == MODE_HBLANK) &&
                            !(first_n && dot_n < DOT_MODE3);
     assign term_m1_next = lcd_en && (mode_n == MODE_VBLANK);
-    // the extra pulse is the mode 2 condition that is seen on the first dots
-    // of line 144 on hardware, alongside the vblank interrupt
-    assign term_m2_next = lcd_en && ((mode_n == MODE_OAM_SCAN) ||
+    // the mode 2 condition is a short pulse at the start of the scan. line 144
+    // has the same pulse on hardware, alongside the vblank interrupt
+    assign term_m2_next = lcd_en && ((mode_n == MODE_OAM_SCAN && dot_n < 9'd4) ||
                                       (ly_n == 8'd144 && dot_n < 9'd4));
 
     always @(posedge clk or posedge rst) begin

@@ -35,7 +35,8 @@
 //                  lcd enable, which masks every export at once, restarts at
 //                  line 0 with a first line, and gates the strobes at the
 //                  exact edges where they would otherwise fire.
-// Revision     : 4.1 - golden model follows ppu_mode_fsm 4.1, line 0 mode 0,
+// Revision     : 4.2 - golden model follows the short mode 2 pulse
+//                  4.1 - golden model follows ppu_mode_fsm 4.1, line 0 mode 0,
 //                    ly_cmp_next and the line 153 comparison pause
 //                  4.0 - rewritten for ppu_mode_fsm 4.0. golden model of the
 //                  cpu views, first line, and engine dot 4 idle.
@@ -199,7 +200,7 @@ module tb_ppu_mode_fsm;
 
     function g_cmp_off(input integer t);
         begin
-            g_cmp_off = (g_dot(t) < 4) || (g_ly(t) == 153 && g_dot(t) >= 8 && g_dot(t) < 12);
+            g_cmp_off = (g_dot(t) < 4 && g_ly(t) != 0) || (g_ly(t) == 153 && g_dot(t) >= 8 && g_dot(t) < 12);
         end
     endfunction
 
@@ -245,7 +246,7 @@ module tb_ppu_mode_fsm;
 
     function g_m2(input integer t);
         begin
-            g_m2 = (g_eng(t) == MODE_OAM_SCAN) || (g_ly(t) == 144 && g_dot(t) < 4);
+            g_m2 = (g_eng(t) == MODE_OAM_SCAN && g_dot(t) < 4) || (g_ly(t) == 144 && g_dot(t) < 4);
         end
     endfunction
 
@@ -403,10 +404,12 @@ module tb_ppu_mode_fsm;
         check(cmp_off_next === 1'b1, "t=452: the compare is held off");
         check(term_m2_next === 1'b1, "t=452: the mode 2 condition is up, the interrupt fires here");
         goto_t(455);
+        check(term_m2_next === 1'b1, "t=455: the mode 2 condition is still up, it lasts 4 dots");
         check(stat_mode_next === 2'd0 && cmp_off_next === 1'b1, "t=455: stat still 0, compare still held");
         goto_t(456);
         check(stat_mode_next === 2'd2 && cmp_off_next === 1'b0, "t=456: stat reads 2, the compare is back, line 1 is 456 dots after");
         check(oam_wr_blocked_next === 1'b1, "t=456: oam writes lock with the stat mode");
+        check(term_m2_next === 1'b0, "t=456: the mode 2 condition is gone again, it was only a short pulse");
         goto_t(528);
         check(vram_blocked_next === 1'b0, "t=528 (line 1 dot 72 in view): vram reads still open");
         goto_t(532);

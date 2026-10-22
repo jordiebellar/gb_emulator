@@ -49,7 +49,9 @@
 //                  is the lcd enable ppu_mode_fsm needs, scx and scy feed the
 //                  tile fetcher, wy and wx place the window, and the palettes
 //                  are applied to each pixel on its way out.
-// Revision     : 3.1 - ly_cmp_next added for the comparison, and a lyc write on
+// Revision     : 3.2 - the dmg stat write bug, a stat write raises the line for an
+//                    instant with every enable set
+//                  3.1 - ly_cmp_next added for the comparison, and a lyc write on
 //                    the edge a match arrives no longer takes the interrupt back
 //                  3.0 - the stat interrupt is now an edge on the or of the
 //                  four enabled conditions instead of four separate strobes,
@@ -230,6 +232,11 @@ module ppu_reg (
                            (m2_ie_n  && term_m2_next) ||
                            (lyc_ie_n && coincidence_old);
 
-    assign irq_lcdstat = ce_gb && (stat_line_n || stat_line_old) && !stat_line_r;
+    // the dmg stat write bug. for the instant of a stat write all four
+    // enables read as set, so any condition that holds raises the line
+    wire stat_line_wb = lcd_en && stat_wr && (term_m0_next || term_m1_next ||
+                                              coincidence_next);
+
+    assign irq_lcdstat = ce_gb && (stat_line_n || stat_line_old || stat_line_wb) && !stat_line_r;
 
 endmodule

@@ -30,7 +30,8 @@
 //                  already holds is itself a rising edge, on the edge of the
 //                  stat write. with the lcd off the mode conditions are low
 //                  but a set coincidence flag keeps the line up.
-// Revision     : 3.1 - ly_cmp_next checks and the late lyc write strobe
+// Revision     : 3.2 - stat write bug checks
+//                  3.1 - ly_cmp_next checks and the late lyc write strobe
 //                  3.0 - rewritten for ppu_reg 3.0. the line is an edge on the
 //                  or of the enabled conditions, the coincidence flag is a
 //                  register with freeze and compare-off rules, and stat mode
@@ -367,6 +368,85 @@ module tb_ppu_reg;
         check_irq(1'b1, "mode 2 enable: its own condition rising strobes");
         tick;
         check_irq(1'b0, "and the strobe is one clock wide");
+        set_terms(1'b0, 1'b0, 1'b0);
+        tick;
+
+        // the dmg stat write bug. a write to stat raises the line for an
+        // instant with every enable set, so mode 0, mode 1 or a coincidence
+        // holding is enough, and the short mode 2 condition is not
+        write_reg(16'hFF41, 8'b0000_0000);
+        set_terms(1'b0, 1'b0, 1'b0);
+        tick;
+        set_terms(1'b1, 1'b0, 1'b0);
+        @(negedge clk);
+        addr = 16'hFF41; data_in = 8'h00; we = 1'b1; sel = 1'b1;
+        check_irq(1'b1, "write bug: a stat write while mode 0 holds strobes with no enables set");
+        tick;
+        we = 1'b0;
+        set_terms(1'b0, 1'b1, 1'b0);
+        tick;
+        @(negedge clk);
+        addr = 16'hFF41; data_in = 8'h00; we = 1'b1; sel = 1'b1;
+        check_irq(1'b1, "write bug: and while mode 1 holds");
+        tick;
+        we = 1'b0;
+        set_terms(1'b0, 1'b0, 1'b1);
+        tick;
+        @(negedge clk);
+        addr = 16'hFF41; data_in = 8'h00; we = 1'b1; sel = 1'b1;
+        check_irq(1'b0, "write bug: not while only the mode 2 condition holds");
+        tick;
+        we = 1'b0;
+        set_terms(1'b0, 1'b0, 1'b0);
+        tick;
+        @(negedge clk);
+        addr = 16'hFF41; data_in = 8'h00; we = 1'b1; sel = 1'b1;
+        check_irq(1'b0, "write bug: nothing holds, nothing fires");
+        tick;
+        we = 1'b0;
+        // a coincidence holding counts too
+        write_reg(16'hFF45, 8'd50);
+        set_ly(8'd50);
+        tick;
+        @(negedge clk);
+        addr = 16'hFF41; data_in = 8'h00; we = 1'b1; sel = 1'b1;
+        check_irq(1'b1, "write bug: a stat write while the coincidence holds strobes");
+        tick;
+        we = 1'b0;
+        write_reg(16'hFF45, 8'd99);
+        set_ly(8'd20);
+        tick;
+        // and none of it with the lcd off
+        write_reg(16'hFF40, 8'h00);
+        tick;
+        set_terms(1'b1, 1'b1, 1'b0);
+        @(negedge clk);
+        addr = 16'hFF41; data_in = 8'h00; we = 1'b1; sel = 1'b1;
+        check_irq(1'b0, "write bug: not while the lcd is off");
+        tick;
+        we = 1'b0;
+        write_reg(16'hFF40, 8'h91);
+        set_terms(1'b0, 1'b0, 1'b0);
+        tick;
+        // the line already high from a real enable means no new edge
+        write_reg(16'hFF41, 8'b0000_1000);
+        set_terms(1'b1, 1'b0, 1'b0);
+        tick;
+        @(negedge clk);
+        addr = 16'hFF41; data_in = 8'h08; we = 1'b1; sel = 1'b1;
+        check_irq(1'b0, "write bug: the line is already high, no second strobe");
+        tick;
+        we = 1'b0;
+        write_reg(16'hFF41, 8'b0000_0000);
+        set_terms(1'b0, 1'b0, 1'b0);
+        tick;
+        // a write to some other register is not a stat write
+        set_terms(1'b1, 1'b0, 1'b0);
+        @(negedge clk);
+        addr = 16'hFF42; data_in = 8'h00; we = 1'b1; sel = 1'b1;
+        check_irq(1'b0, "write bug: a write to scy does not trigger it");
+        tick;
+        we = 1'b0;
         set_terms(1'b0, 1'b0, 1'b0);
         tick;
 
