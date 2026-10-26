@@ -285,8 +285,8 @@ module ppu_fetcher (
     wire              considered = last_valid && (last_t == p_tile) && (last_win == sp_in_win);
 
     // pixels of the tile strictly to the right of the leftmost pixel, minus 2
-    wire [3:0] wait_dots = sp_left0 ? 4'd5 :
-                           considered ? 4'd0 :
+    wire [3:0] wait_dots = considered ? 4'd0 :
+                           sp_left0 ? 4'd5 :
                            (p_in_tile >= 3'd5) ? 4'd0 : (4'd5 - {1'b0, p_in_tile});
     wire [3:0] penalty   = wait_dots + 4'd6;       // 6 to 11
 
@@ -473,4 +473,4 @@ module ppu_fetcher (
         end
     end
 
-endmodule
+endmodule

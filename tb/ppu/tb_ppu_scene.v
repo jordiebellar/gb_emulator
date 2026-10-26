@@ -20,8 +20,11 @@
 //                  drawn on, plus the pan docs object penalty per object, with
 //                  a set of the background and window tiles already taken by
 //                  an earlier object rather than the rtl's last tile
-//                  register. an object at oam x of 0 costs 11, one at x of
-//                  168 and up costs nothing.
+//                  register. an object at oam x of 0 costs 11, or 6 when an
+//                  earlier object already took the tile, and one at x of 168
+//                  and up costs nothing. line 0 of the frame is drawn with
+//                  no objects, since the first line after lcd on has no oam
+//                  scan.
 //
 //                  scenes: directed ones for the window alone, objects
 //                  alone, 8 x 16 objects, and objects crowded to the left
@@ -31,7 +34,9 @@
 //                  position is kept at 7 or more, the part of the pan docs
 //                  where wx below 7 has hardware quirks that are not
 //                  modeled. dma is not running here, see tb_oam_dma.
-// Revision     : 1.0 - initial implementation
+// Revision     : 1.1 - line 0 has no objects, a second object at x of 0
+//                  costs 6
+//                  1.0 - initial implementation
 // =============================================================================
 `timescale 1ns / 1ps
 
@@ -201,6 +206,9 @@ module tb_ppu_scene;
                     end
                 end
                 if (nsel == 11) nsel = 10;
+                // the first line after the lcd turns on has no oam scan on
+                // hardware, so it has no objects
+                if (l == 0) nsel = 0;
                 exp_sprites_drawn = exp_sprites_drawn + nsel;
                 // stable sort by x, only swap on strictly greater
                 for (i = 0; i < nsel; i = i + 1) srt_e[i] = sel_e[i];
@@ -253,7 +261,9 @@ module tb_ppu_scene;
                             // never reached, no penalty
                         end
                         else if (xx == 0) begin
-                            pen = pen + 11;
+                            // the first costs 11, one after it on the same
+                            // background tile -1 costs only the 6 of its fetch
+                            pen = pen + (seen_bg[1] ? 6 : 11);
                             seen_bg[1] = 1'b1;           // background tile -1
                         end
                         else begin

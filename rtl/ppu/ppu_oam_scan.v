@@ -50,6 +50,7 @@ module ppu_oam_scan (
     input  wire         rst,
 
     input  wire         scan_active,   // the ppu is in mode 2
+    input  wire         blank,         // first line after lcd on, no scan, list stays empty
     input  wire [7:0]   ly,
     input  wire         obj_tall,      // lcdc bit 2, 1 for 8 x 16 objects
     input  wire         dma_active,
@@ -87,7 +88,11 @@ module ppu_oam_scan (
             list  <= 320'd0;
         end
         else if (ce_gb) begin
-            if (!scan_active) begin
+            if (blank) begin
+                cnt   <= 7'd0;
+                count <= 4'd0;
+            end
+            else if (!scan_active) begin
                 cnt <= 7'd0;
             end
             else begin
@@ -118,4 +123,4 @@ module ppu_oam_scan (
         end
     end
 
-endmodule
+endmodule

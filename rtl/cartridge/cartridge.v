@@ -59,16 +59,20 @@ module cartridge #(
             boot_active <= 1'b0;
     end
 
-    // rom read register, every clock. the boot overlay only covers the
-    // bottom 256 bytes, everything else always comes from cart_rom
-    reg [7:0] rom_rdata;
+    // rom read registers, every clock. each rom has its own single-port
+    // registered read so synthesis maps both to block ram. the boot overlay
+    // only covers the bottom 256 bytes, everything else comes from cart_rom
+    reg [7:0] boot_q;
+    reg [7:0] cart_q;
+    reg       boot_sel_q;
 
     always @(posedge clk) begin
-        if (boot_active && addr[15:8] == 8'h00)
-            rom_rdata <= boot_rom[addr[7:0]];
-        else
-            rom_rdata <= cart_rom[addr[14:0]];
+        boot_q     <= boot_rom[addr[7:0]];
+        cart_q     <= cart_rom[addr[14:0]];
+        boot_sel_q <= boot_active && addr[15:8] == 8'h00;
     end
+
+    wire [7:0] rom_rdata = boot_sel_q ? boot_q : cart_q;
 
     // section 3: data_out is 0 when sel is low. two sels here, so the gate
     // picks whichever is active, 0 if neither is

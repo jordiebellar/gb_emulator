@@ -50,7 +50,7 @@ module tb_oam_dma;
     wire        we, bm_sel, bm_late;
     wire [7:0]  bus_rdata;
     reg         sel_en;      // masks the dma register select
-    reg  [1:0]  oam_mode;    // the ppu mode the oam sees after the edge
+    reg  [1:0]  oam_mode;    // the ppu mode, 2 and 3 lock oam for both reads and writes
     reg  [15:0] gate_addr;
 
     // the source memory
@@ -95,7 +95,7 @@ module tb_oam_dma;
     oam u_oam (
         .clk(clk), .ce_gb(1'b0), .ce_m(ce_m), .rst(1'b0),
         .addr(addr), .data_in(wdata), .we(we), .sel(sel_oam), .data_out(oam_dout), .stall(),
-        .mode_next(oam_mode), .dma_active(dma_active),
+        .blocked_next(oam_mode[1]), .wr_blocked_next(oam_mode[1]), .dma_active(dma_active),
         .entry_idx(6'd0), .entry_data(),
         .dma_we(dma_we), .dma_waddr(dma_waddr), .dma_wdata(dma_wdata)
     );

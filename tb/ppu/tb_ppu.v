@@ -25,17 +25,26 @@
 //                    and the wrapper's pixel output compared with an
 //                    oracle, with mode 3 lasting 172 + (scx & 7) dots.
 //                  part e - accesses whose ce_m edge is exactly a ppu
-//                    transition edge. vram and oam writes, an ly read, and
-//                    a stat read are each landed on the edge that enters or
-//                    leaves a mode, and must be decided by the mode after
-//                    that edge. two controls away from any transition show
-//                    the harness lands where it claims to.
+//                    transition edge. vram and oam reads and writes, an ly
+//                    read, and stat reads are each landed on the edges where
+//                    a lock or a mode changes, and must be decided by the
+//                    state after that edge. reads lock before writes do, oam
+//                    writes get through for 4 dots where mode 3 starts, and
+//                    everything unlocks 1 dot after the engine leaves mode
+//                    3, so the edge that leaves mode 3 is still locked.
+//                    controls away from any transition show the harness
+//                    lands where it claims to.
 //                  part d also sets bgp to a reversed palette over the bus
 //                  and checks pixel_shade against it, and lcd_on is checked
 //                  against lcdc bit 7.
 //                  every bus access goes through bus_master, which samples
 //                  reads on the ce_m edge the way the cpu does.
-// Revision     : 2.2 - the oam render port is gone from the ppu, so the
+// Revision     : 3.0 - for the 4.0 timing engine. the first line after
+//                  lcd on is 452 dots, part c ticks moved to match, the
+//                  stat interrupt is an edge on the or of its sources so the
+//                  mode 0 interrupt of the lyc line is blocked, and part e
+//                  checks the separate read and write locks.
+//                  2.2 - the oam render port is gone from the ppu, so the
 //                  check that read through it is removed. the dma write
 //                  port is tied off. oam's own entry port is tested in
 //                  tb_oam.
@@ -235,7 +244,7 @@ module tb_ppu;
 
     integer i, bad;
     reg [7:0] expv;
-    reg [7:0] ly_edge, stat_edge;
+    reg [7:0] ly_edge, r80, r84, r252, r256, o0, o252, o256, s80, s84, s0, s4;
 
     initial begin
         dma_active = 1'b0;
@@ -373,13 +382,19 @@ module tb_ppu;
         while (tick < 65720) @(negedge clk);
         mon_en = 1'b0;
 
+        // the first line after lcd on is 452 engine dots, so everything on
+        // the later lines sits 4 ticks earlier than 456 x n. the mode 0
+        // interrupt rises 3 ticks after the engine reaches mode 0. the lyc
+        // match on line 2 is held up from tick 912 until line 3, so the mode
+        // 0 interrupt of line 2 arrives with the line already high and is
+        // blocked, which makes 144 strobes and not 145
         check(vb_n === 1, "irq_vblank strobed exactly once in the frame");
-        check(vb_k[0] === 65664, "irq_vblank landed on tick 65664, 456 x 144");
-        check(st_n === 145, "irq_lcdstat strobed 145 times: 144 hblanks plus one lyc match");
-        check(st_k[0] === 252, "first stat interrupt is line 0's hblank, tick 252");
-        check(st_k[1] === 708, "second is line 1's hblank, tick 708 = 456 + 252");
-        check(st_k[2] === 912, "third is the lyc=2 match, on the edge ly becomes 2, tick 912 = 2 x 456");
-        check(st_k[3] === 1164, "fourth is line 2's hblank, tick 1164 = 2 x 456 + 252");
+        check(vb_k[0] === 65661, "irq_vblank landed on tick 65661, 1 tick after 452 + 143 x 456");
+        check(st_n === 144, "irq_lcdstat strobed 144 times: 143 hblanks plus one lyc match, line 2's hblank is blocked");
+        check(st_k[0] === 251, "first stat interrupt is line 0's hblank, tick 251");
+        check(st_k[1] === 707, "second is line 1's hblank, tick 707 = 452 + 252 + 3");
+        check(st_k[2] === 912, "third is the lyc=2 match, tick 912, the compare comes back 4 ticks after ly becomes 2");
+        check(st_k[3] === 1619, "fourth is line 3's hblank, tick 1619, line 2's was blocked by the lyc match still held");
 
         // =====================================================================
         // part d - the fetcher through the wrapper, scx and scy set over the bus
@@ -434,34 +449,70 @@ module tb_ppu;
         bus_write(16'hFF40, 8'h00);          // lcd off so vram and oam are writable
         bus_write(16'hFF43, 8'h00);          // scx 0, so mode 3 is 172 dots and ends on dot 252
         bus_write(16'h8000, 8'h11);
-        bus_write(16'h8001, 8'h00);
-        bus_write(16'h8002, 8'h00);
-        bus_write(16'h8003, 8'h00);
-        bus_write(16'hFE01, 8'h00);
-        bus_write(16'hFE02, 8'h00);
+        bus_write(16'hFE00, 8'h5A);
         bus_write(16'hFF40, 8'h91);          // lcd on. this commit is a ce_m edge, so ce_m
                                              // then lands on every tick that is a multiple of 4
 
-        // each access starts on the negedge after the ce_m edge four ticks before the tick
-        // it should land on, and write_now and read_now run it from there. every tick used
-        // here is a multiple of 4, so every one of them is a ce_m edge
-        wait_dot(76);  bm.write_now(16'h8000, 8'hAB);       // lands on tick 80, the edge that enters mode 3
-        wait_dot(156); bm.write_now(16'h8002, 8'hC1);       // control, mid mode 3
-        wait_dot(248); bm.write_now(16'h8001, 8'hBB);       // lands on tick 252, the edge that leaves mode 3
-        wait_dot(296); bm.write_now(16'h8003, 8'hC2);       // control, mid hblank
-        wait_dot(452); bm.read_now(16'hFF44);  ly_edge = bm.rd;     // tick 456, the edge that increments ly
-        wait_line_dot(8'd1, 9'd76);  bm.read_now(16'hFF41); stat_edge = bm.rd;  // line 1 tick 80
-        wait_line_dot(8'd1, 9'd452); bm.write_now(16'hFE01, 8'hCC);  // tick 912, the edge that enters mode 2
-        wait_line_dot(8'd2, 9'd248); bm.write_now(16'hFE02, 8'hDD);  // tick 1164, the edge that leaves mode 3
+        // each access starts on the negedge after the ce_m edge four ticks
+        // before the dot it should land on, and write_now and read_now run it
+        // from there. every dot used is a multiple of 4, so every one of them
+        // is a ce_m edge. each test gets a line of its own. a dot is the
+        // engine dot after the edge. writes lock 4 dots after reads do, and
+        // everything unlocks 1 dot after the engine leaves mode 3, so on a
+        // ce_m edge at 252 the stat mode still reads 3
+        // vram, writes then reads. a dropped write leaves the pattern part a
+        // wrote, vram[i] = i ^ 0x5A and oam[i] = 3i + 1
+        wait_line_dot(8'd1, 9'd76);   bm.write_now(16'h8010, 8'hA1);   // dot 80, the engine enters mode 3
+        wait_line_dot(8'd2, 9'd76);   bm.read_now(16'h8000);  r80  = bm.rd;
+        wait_line_dot(8'd3, 9'd80);   bm.write_now(16'h8011, 8'hA2);   // dot 84, the stat mode reads 3
+        wait_line_dot(8'd4, 9'd80);   bm.read_now(16'h8000);  r84  = bm.rd;
+        wait_line_dot(8'd5, 9'd156);  bm.write_now(16'h8012, 8'hA3);   // control, mid mode 3
+        wait_line_dot(8'd6, 9'd248);  bm.write_now(16'h8013, 8'hA4);   // dot 252, the engine has left mode 3
+        wait_line_dot(8'd7, 9'd248);  bm.read_now(16'h8000);  r252 = bm.rd;
+        wait_line_dot(8'd8, 9'd252);  bm.write_now(16'h8014, 8'hA5);   // dot 256, the stat mode reads 0
+        wait_line_dot(8'd9, 9'd252);  bm.read_now(16'h8000);  r256 = bm.rd;
+        wait_line_dot(8'd10, 9'd296); bm.write_now(16'h8015, 8'hA6);   // control, mid hblank
+        // oam
+        wait_line_dot(8'd11, 9'd452); bm.write_now(16'hFE10, 8'hB1);   // dot 0 of line 12, the engine enters mode 2
+        wait_line_dot(8'd12, 9'd452); bm.read_now(16'hFE00);  o0   = bm.rd;
+        wait_line_dot(8'd13, 9'd0);   bm.write_now(16'hFE11, 8'hB2);   // dot 4, the stat mode reads 2
+        wait_line_dot(8'd14, 9'd76);  bm.write_now(16'hFE12, 8'hB3);   // dot 80, the gap
+        wait_line_dot(8'd15, 9'd80);  bm.write_now(16'hFE13, 8'hB4);   // dot 84, the stat mode reads 3
+        wait_line_dot(8'd16, 9'd248); bm.write_now(16'hFE14, 8'hB5);   // dot 252, the engine has left mode 3
+        wait_line_dot(8'd17, 9'd248); bm.read_now(16'hFE00);  o252 = bm.rd;
+        wait_line_dot(8'd18, 9'd252); bm.write_now(16'hFE15, 8'hB6);   // dot 256, the stat mode reads 0
+        wait_line_dot(8'd19, 9'd252); bm.read_now(16'hFE00);  o256 = bm.rd;
+        // ly and stat
+        wait_line_dot(8'd20, 9'd452); bm.read_now(16'hFF44);  ly_edge = bm.rd;     // the edge that increments ly
+        wait_line_dot(8'd21, 9'd76);  bm.read_now(16'hFF41);  s80  = bm.rd;
+        wait_line_dot(8'd22, 9'd80);  bm.read_now(16'hFF41);  s84  = bm.rd;
+        wait_line_dot(8'd23, 9'd452); bm.read_now(16'hFF41);  s0   = bm.rd;        // dot 0 of line 24
+        wait_line_dot(8'd24, 9'd0);   bm.read_now(16'hFF41);  s4   = bm.rd;
 
-        check(dut.u_vram.mem[0] === 8'h11, "vram write on the edge that enters mode 3 is dropped");
-        check(dut.u_vram.mem[2] === 8'h00, "control: a vram write mid mode 3 is dropped");
-        check(dut.u_vram.mem[1] === 8'hBB, "vram write on the edge that leaves mode 3 lands");
-        check(dut.u_vram.mem[3] === 8'hC2, "control: a vram write mid hblank lands");
-        check(ly_edge === 8'd1, "ly read on the edge that increments ly returns the new value");
-        check(stat_edge[1:0] === 2'd3, "stat read on the edge that enters mode 3 returns mode 3");
-        check(dut.u_oam.mem[1] === 8'h00, "oam write on the edge that enters mode 2 is dropped");
-        check(dut.u_oam.mem[2] === 8'hDD, "oam write on the edge that leaves mode 3 lands");
+        check(dut.u_vram.mem[16] === 8'hA1, "vram write on the edge the engine enters mode 3 lands, writes lock 4 dots later");
+        check(r80 === 8'hFF, "vram read on the edge the engine enters mode 3 returns $FF, reads lock first");
+        check(dut.u_vram.mem[17] === ((17 ^ 8'h5A) & 8'hFF), "vram write on the edge the stat mode reads 3 is dropped");
+        check(r84 === 8'hFF, "and the read there returns $FF");
+        check(dut.u_vram.mem[18] === ((18 ^ 8'h5A) & 8'hFF), "control: a vram write mid mode 3 is dropped");
+        check(dut.u_vram.mem[19] === ((19 ^ 8'h5A) & 8'hFF), "vram write on the edge the engine leaves mode 3 is still dropped, the stat mode reads 3");
+        check(r252 === 8'hFF, "and the read there still returns $FF");
+        check(dut.u_vram.mem[20] === 8'hA5, "vram write 4 dots later lands");
+        check(r256 === 8'h11, "and the read there returns the data");
+        check(dut.u_vram.mem[21] === 8'hA6, "control: a vram write mid hblank lands");
+        check(dut.u_oam.mem[16] === 8'hB1, "oam write on the edge the engine enters mode 2 lands, writes lock 4 dots later");
+        check(o0 === 8'hFF, "oam read on the edge the engine enters mode 2 returns $FF, reads lock first");
+        check(dut.u_oam.mem[17] === ((17 * 3 + 1) & 8'hFF), "oam write on the edge the stat mode reads 2 is dropped");
+        check(dut.u_oam.mem[18] === 8'hB3, "oam write on the edge the engine enters mode 3 lands, the 4 dot gap");
+        check(dut.u_oam.mem[19] === ((19 * 3 + 1) & 8'hFF), "oam write on the edge the stat mode reads 3 is dropped");
+        check(dut.u_oam.mem[20] === ((20 * 3 + 1) & 8'hFF), "oam write on the edge the engine leaves mode 3 is still dropped");
+        check(o252 === 8'hFF, "and the oam read there still returns $FF");
+        check(dut.u_oam.mem[21] === 8'hB6, "oam write 4 dots later lands");
+        check(o256 === 8'h5A, "and the oam read there returns the data");
+        check(ly_edge === 8'd21, "ly read on the edge that increments ly returns the new value");
+        check(s80[1:0] === 2'd2, "stat read on the edge the engine enters mode 3 still returns mode 2");
+        check(s84[1:0] === 2'd3, "stat read 4 dots later returns mode 3");
+        check(s0[1:0] === 2'd0, "stat read on the edge a line starts returns mode 0");
+        check(s4[1:0] === 2'd2, "stat read 4 dots later returns mode 2");
 
         $display("");
         if (errors == 0)

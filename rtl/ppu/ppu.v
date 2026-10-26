@@ -112,6 +112,17 @@ module ppu (
     wire [7:0]  ly;
     wire [1:0]  mode_next;
     wire [7:0]  ly_next;
+    wire [1:0]  stat_mode_next;
+    wire [7:0]  ly_cpu_next;
+    wire [7:0]  ly_cmp_next;
+    wire        cmp_off_next;
+    wire        oam_blocked_next;
+    wire        vram_blocked_next;
+    wire        oam_wr_blocked_next;
+    wire        vram_wr_blocked_next;
+    wire        term_m0_next;
+    wire        term_m1_next;
+    wire        term_m2_next;
     wire [7:0]  lcdc;
     wire [7:0]  scx;
     wire [7:0]  scy;
@@ -129,6 +140,8 @@ module ppu (
     wire        entering_oam_scan;
     wire        entering_vblank;
     wire        fifo_done;
+    wire        first_line;
+    wire        win_check;
 
     wire [12:0] vram_render_addr;
     wire [7:0]  vram_render_data;
@@ -154,8 +167,19 @@ module ppu (
         .ly                (ly),
         .mode_next         (mode_next),
         .ly_next           (ly_next),
-        .oam_stall         (),
-        .vram_stall        (),
+        .stat_mode_next    (stat_mode_next),
+        .ly_cpu_next       (ly_cpu_next),
+        .ly_cmp_next       (ly_cmp_next),
+        .cmp_off_next      (cmp_off_next),
+        .oam_blocked_next  (oam_blocked_next),
+        .vram_blocked_next (vram_blocked_next),
+        .oam_wr_blocked_next  (oam_wr_blocked_next),
+        .vram_wr_blocked_next (vram_wr_blocked_next),
+        .term_m0_next      (term_m0_next),
+        .term_m1_next      (term_m1_next),
+        .term_m2_next      (term_m2_next),
+        .first_line        (first_line),
+        .win_check         (win_check),
         .entering_hblank   (entering_hblank),
         .entering_oam_scan (entering_oam_scan),
         .entering_vblank   (entering_vblank),
@@ -167,6 +191,7 @@ module ppu (
         .ce_gb       (ce_gb),
         .rst         (rst),
         .scan_active (mode == 2'd2),
+        .blank       (first_line),
         .ly          (ly),
         .obj_tall    (lcdc[2]),
         .dma_active  (dma_active),
@@ -182,7 +207,7 @@ module ppu (
         .rst         (rst),
         .active      (mode == 2'd3),
         .lcd_en      (lcdc[7]),
-        .oam_scan    (mode == 2'd2),
+        .oam_scan    (win_check),
         .ly          (ly),
         .scx         (scx),
         .scy         (scy),
@@ -211,12 +236,13 @@ module ppu (
         .sel               (sel_ppu_reg),
         .data_out          (ppu_reg_data_out),
         .stall             (),
-        .mode_next         (mode_next),
-        .ly_in             (ly),
-        .ly_next           (ly_next),
-        .entering_hblank   (entering_hblank),
-        .entering_oam_scan (entering_oam_scan),
-        .entering_vblank   (entering_vblank),
+        .stat_mode_next    (stat_mode_next),
+        .ly_cpu_next       (ly_cpu_next),
+        .ly_cmp_next       (ly_cmp_next),
+        .cmp_off_next      (cmp_off_next),
+        .term_m0_next      (term_m0_next),
+        .term_m1_next      (term_m1_next),
+        .term_m2_next      (term_m2_next),
         .lcdc_out          (lcdc),
         .scx_out           (scx),
         .scy_out           (scy),
@@ -239,7 +265,8 @@ module ppu (
         .sel         (sel_ppu_vram),
         .data_out    (ppu_vram_data_out),
         .stall       (),
-        .mode_next   (mode_next),
+        .blocked_next (vram_blocked_next),
+        .wr_blocked_next (vram_wr_blocked_next),
         .render_addr (vram_render_addr),
         .render_data (vram_render_data)
     );
@@ -255,7 +282,8 @@ module ppu (
         .sel         (sel_ppu_oam),
         .data_out    (ppu_oam_data_out),
         .stall       (),
-        .mode_next   (mode_next),
+        .blocked_next (oam_blocked_next),
+        .wr_blocked_next (oam_wr_blocked_next),
         .dma_active  (dma_active),
         .entry_idx   (oam_entry_idx),
         .entry_data  (oam_entry_data),
@@ -264,4 +292,4 @@ module ppu (
         .dma_wdata   (dma_wdata)
     );
 
-endmodule
+endmodule
