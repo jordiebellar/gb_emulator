@@ -201,6 +201,27 @@ module tb_gb_boot;
         end
     end
 
+    // blargg serial. the rom writes a char to sb (ff01), then 81 to sc (ff02).
+    // the cpu commits writes on ce_m, so sample there. stops on "Passed" or
+    // "Failed" so a run takes only as long as the test does
+    reg [7:0]  sb = 8'h00;
+    reg [47:0] last6 = 48'd0;
+    always @(posedge clk) begin
+        if (!rst && dut.ce_m && we) begin
+            if (a == 16'hFF01) sb <= d;
+            if (a == 16'hFF02 && d == 8'h81) begin
+                $write("%c", sb);
+                $fflush;
+                last6 <= {last6[39:0], sb};
+                if ({last6[39:0], sb} == "Passed" || {last6[39:0], sb} == "Failed") begin
+                    $display("\nBLARGG done at frame %0d", frame);
+                    dump("frames/frame_last.pgm");
+                    $finish;
+                end
+            end
+        end
+    end
+
     initial begin
         repeat (8) @(posedge clk);
         rst = 1'b0;

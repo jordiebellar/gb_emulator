@@ -75,7 +75,12 @@ module vram (
     // blocked, regardless of what rdata holds
     assign data_out = !sel ? 8'h00 : (blocked ? 8'hFF : rdata);
 
-    // ppu-internal port, plain combinational read, no blocking
-    assign render_data = mem[render_addr];
+    // ppu-internal port, registered every clock so it maps to block ram.
+    // the fetcher only samples it on ce_gb, 23+ clocks after the address
+    // changes, so the extra clock of latency is invisible at gb timing
+    reg [7:0] render_q;
+    always @(posedge clk)
+        render_q <= mem[render_addr];
+    assign render_data = render_q;
 
-endmodule
+endmodule

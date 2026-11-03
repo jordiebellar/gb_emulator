@@ -165,8 +165,14 @@ module gb_top #(
     assign dma_rdata = dma_src_rom  ? cart_data_out :
                        dma_src_wram ? wram_data_out : 8'hFF;
 
-    // the cpu sees ff for anything below ff00 during a transfer
-    assign cpu_din = cpu_blocked ? 8'hFF : mm_data_in;
+    // the cpu sees ff for anything below ff00 during a transfer.
+    // registered every clock to cut the peripheral read paths from the cpu
+    // datapath. the cpu only samples on ce_m, and no gb state changes in the
+    // 22+ clocks before a ce_m edge, so this is the same value it would see
+    reg [7:0] cpu_din_q;
+    always @(posedge clk_100m)
+        cpu_din_q <= cpu_blocked ? 8'hFF : mm_data_in;
+    assign cpu_din = cpu_din_q;
 
     // vram is dropped for the cpu during a transfer, oam is handled in the ppu
     wire sel_ppu_vram_eff = sel_ppu_vram & ~cpu_blocked;
