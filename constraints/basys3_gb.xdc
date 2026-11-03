@@ -21,6 +21,11 @@ set_property -dict { PACKAGE_PIN V16 IOSTANDARD LVCMOS33 } [get_ports {sw[1]}]
 set_property -dict { PACKAGE_PIN W16 IOSTANDARD LVCMOS33 } [get_ports {sw[2]}]
 set_property -dict { PACKAGE_PIN W17 IOSTANDARD LVCMOS33 } [get_ports {sw[3]}]
 
+## usb keyboard - the usb port is a host chip that hands the fpga ps/2
+## arrows, x = a, z = b, enter = start, backspace or either shift = select
+set_property -dict { PACKAGE_PIN C17 IOSTANDARD LVCMOS33 PULLUP true } [get_ports PS2Clk]
+set_property -dict { PACKAGE_PIN B17 IOSTANDARD LVCMOS33 PULLUP true } [get_ports PS2Data]
+
 ## leds - low 16 bits of the cpu address bus
 set_property -dict { PACKAGE_PIN U16 IOSTANDARD LVCMOS33 } [get_ports {led[0]}]
 set_property -dict { PACKAGE_PIN E19 IOSTANDARD LVCMOS33 } [get_ports {led[1]}]
@@ -59,9 +64,11 @@ set_property -dict { PACKAGE_PIN P19 IOSTANDARD LVCMOS33 } [get_ports Hsync]
 set_property -dict { PACKAGE_PIN R19 IOSTANDARD LVCMOS33 } [get_ports Vsync]
 
 ## buttons and switches are asynchronous, gb_fpga_top runs them through a
-## 2-flop synchronizer. the leds are only for looking at
+## 2-flop synchronizer, and the ps/2 lines go through the filter in ps2_keys.
+## the leds are only for looking at
 set_false_path -from [get_ports {btnC btnU btnD btnL btnR}]
 set_false_path -from [get_ports {sw[*]}]
+set_false_path -from [get_ports {PS2Clk PS2Data}]
 set_false_path -to   [get_ports {led[*]}]
 
 ## optional - only if the timing report shows setup failures inside the ppu.

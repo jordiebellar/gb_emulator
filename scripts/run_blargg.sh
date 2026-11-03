@@ -14,6 +14,7 @@ ROOT=$(cd "$(dirname "$0")/.." && pwd)
 SIM="$ROOT/sim/sim_blargg.vvp"
 cd "$ROOT"
 
+mkdir -p "$ROOT/sim"
 iverilog -o "$SIM" tb/cpu/tb_blargg.v rtl/cpu/cpu.v \
     rtl/cpu/interrupt_ctrl.v rtl/timer/timer.v || exit 1
 

@@ -31,7 +31,8 @@ add_files -norecurse [concat \
           $repo/rtl/memory/wram.v \
           $repo/rtl/memory/hram.v \
           $repo/rtl/cartridge/cartridge.v \
-          $repo/rtl/joypad/joypad.v] \
+          $repo/rtl/joypad/joypad.v \
+          $repo/rtl/joypad/ps2_keys.v] \
     [glob $repo/rtl/ppu/*.v]]
 
 add_files -fileset constrs_1 -norecurse $repo/constraints/basys3_gb.xdc

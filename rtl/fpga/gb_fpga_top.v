@@ -14,7 +14,10 @@
 //                    - btnU, btnD, btnL, btnR are the d-pad
 //                    - sw0 is a, sw1 is b, sw2 is select, sw3 is start. the
 //                      switches hold their level, which is fine for bring up
-//                      and gets replaced by the joypad board later
+//                    - a usb keyboard in the usb port plays the game, see
+//                      ps2_keys.v - arrows, x is a, z is b, enter is start,
+//                      backspace or either shift is select. it is ored with
+//                      the buttons and switches, so both work at once
 //                    - led15 to led0 show the cpu address bus, so a running
 //                      machine flickers and a stuck cpu holds a pattern
 //
@@ -29,7 +32,8 @@
 //                  reset is held for 256 clocks at power up and for as long as
 //                  btnC is down. every input goes through a 2 flop
 //                  synchronizer before it reaches the machine.
-// Revision     : 1.0 - initial implementation
+// Revision     : 1.1 - added the ps/2 keyboard input
+//                  1.0 - initial implementation
 // =============================================================================
 `timescale 1ns / 1ps
 
@@ -44,6 +48,8 @@ module gb_fpga_top #(
     input  wire        btnL,
     input  wire        btnR,
     input  wire [3:0]  sw,
+    input  wire        PS2Clk,
+    input  wire        PS2Data,
 
     output wire [3:0]  vgaRed,
     output wire [3:0]  vgaGreen,
@@ -69,11 +75,21 @@ module gb_fpga_top #(
     // ------------------------------------------------------------------------
     // inputs - d-pad, a, b, select, start
     // ------------------------------------------------------------------------
+    wire [7:0] kb_keys;
+
+    ps2_keys u_kb (
+        .clk      (clk),
+        .rst      (rst),
+        .ps2_clk  (PS2Clk),
+        .ps2_data (PS2Data),
+        .keys     (kb_keys)
+    );
+
     reg [7:0] in_s1 = 8'd0;
     reg [7:0] in_s2 = 8'd0;
 
     always @(posedge clk) begin
-        in_s1 <= {sw[3], sw[2], sw[1], sw[0], btnD, btnU, btnL, btnR};
+        in_s1 <= {sw[3], sw[2], sw[1], sw[0], btnD, btnU, btnL, btnR} | kb_keys;
         in_s2 <= in_s1;
     end
 

@@ -1,13 +1,36 @@
+# simulation output
 *.vvp
 *.vcd
-*.log
+*.fst
+*.pgm
+sim/
+sim_blargg
+obj_dir/
+frames/
+
+# vivado
 *.jou
+*.log
+*.str
+*.xpr
 .Xil/
 *.runs/
 *.cache/
+*.hw/
+*.ip_user_files/
+*.sim/
+
+# roms are not redistributable, see roms/README.md
 roms/boot/
 roms/game/
+blargg/
 *.gb
+*.gbc
 *.hex
 !tb/**/*.hex
-sim/tb_cpu
+
+# editors and operating systems
+.DS_Store
+Thumbs.db
+desktop.ini
+*~
