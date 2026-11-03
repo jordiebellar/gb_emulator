@@ -37,7 +37,8 @@ module timer(
     input wire sel,                // Chip select
     output reg [7:0] data_out,     // Data bus output (combinational, post-edge value)
     output wire stall,             // Stall signal
-    output wire irq_timer          // Timer interrupt request (strobe on reload edge)
+    output wire irq_timer,         // Timer interrupt request (strobe on reload edge)
+    output wire irq_timer_view     // irq_timer as the next ce_m edge would raise it, edge or no edge
 );
 
 reg [15:0] sys_cnt;              // System counter
@@ -83,6 +84,7 @@ wire reload_now = ovf_pending && ce_m;
 
 // Timer interrupt request assignment
 assign irq_timer = reload_now;
+assign irq_timer_view = ovf_pending;
 
 // Next state logic for TIMA and the overflow flag. Order is the priority:
 // reload, then CPU write, then tick.
@@ -135,14 +137,31 @@ always @(posedge clk or posedge rst) begin
     end
 end
 
-// Data output logic: post-edge values, so a read sees this edge's update
+// Read view: the values after the next M-cycle edge. The CPU samples a read
+// only on a ce_m edge, where ce_gb is high too and a read writes nothing, so
+// the view assumes both. That makes it the same on every clock between two
+// edges, which lets a read register capture it early and hold exactly what
+// the edge would show.
+wire [15:0] cnt_v      = sys_cnt + 16'h0001;
+wire        timer_in_v = tac[2] & sel_bit(cnt_v, tac[1:0]);
+wire        tima_tick_v = timer_in_now & ~timer_in_v;
+
+reg [7:0] tima_v;
+always @(*) begin
+    tima_v = tima;
+    if (ovf_pending)
+        tima_v = tma;
+    else if (tima_tick_v)
+        tima_v = (tima == 8'hFF) ? 8'h00 : tima + 8'h01;
+end
+
 always @(*) begin
     if (sel) begin
         case (addr[1:0])
-            2'b00: data_out = cnt_next[15:8];
-            2'b01: data_out = tima_next;
-            2'b10: data_out = tma_next;
-            2'b11: data_out = {5'b11111, tac_next};
+            2'b00: data_out = cnt_v[15:8];
+            2'b01: data_out = tima_v;
+            2'b10: data_out = tma;
+            2'b11: data_out = {5'b11111, tac};
             default: data_out = 8'h00;
         endcase
     end

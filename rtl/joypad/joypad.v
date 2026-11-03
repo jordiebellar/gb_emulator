@@ -45,7 +45,8 @@ module joypad (
     input  wire btn_select,
     input  wire btn_start,
 
-    output wire irq_joypad
+    output wire irq_joypad,
+    output wire irq_joypad_view
 );
 
     assign stall = 1'b0;
@@ -88,6 +89,7 @@ module joypad (
             nibble_prev <= nibble;
     end
 
-    assign irq_joypad = ce_gb && |(nibble_prev & ~nibble);
+    assign irq_joypad_view = |(nibble_prev & ~nibble);
+    assign irq_joypad      = ce_gb && irq_joypad_view;
 
 endmodule

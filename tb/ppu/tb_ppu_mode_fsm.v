@@ -268,6 +268,7 @@ module tb_ppu_mode_fsm;
     integer mon_moves   = 0; // edges where the stat mode or ly changed
     integer mon_shown   = 0;
     integer ta;
+    integer tv;
     reg [1:0] last_stat;
     reg [7:0] last_ly;
     reg       bad_now;
@@ -298,17 +299,21 @@ module tb_ppu_mode_fsm;
             end
             else begin
                 ta = ce_gb ? tcount + 1 : tcount;
-                if (stat_mode_next !== g_stat(ta))      mismatch("stat mode");
-                if (ly_cpu_next !== g_lyc(ta))          mismatch("ly");
-                if (ly_cmp_next !== g_lycmp(ta))        mismatch("ly for the comparison");
-                if (cmp_off_next !== g_cmp_off(ta))     mismatch("compare hold");
-                if (oam_blocked_next !== g_oam_rd(ta))  mismatch("oam read lock");
-                if (vram_blocked_next !== g_vram_rd(ta)) mismatch("vram read lock");
+                // the cpu views and the read locks show the state after the next
+                // tick on every clock, tick or no tick (the stat line terms too), so a read register can
+                // capture them early. everything else follows the real edge
+                tv = tcount + 1;
+                if (stat_mode_next !== g_stat(tv))      mismatch("stat mode");
+                if (ly_cpu_next !== g_lyc(tv))          mismatch("ly");
+                if (ly_cmp_next !== g_lycmp(tv))        mismatch("ly for the comparison");
+                if (cmp_off_next !== g_cmp_off(tv))     mismatch("compare hold");
+                if (oam_blocked_next !== g_oam_rd(tv))  mismatch("oam read lock");
+                if (vram_blocked_next !== g_vram_rd(tv)) mismatch("vram read lock");
                 if (oam_wr_blocked_next !== g_oam_wr(ta)) mismatch("oam write lock");
                 if (vram_wr_blocked_next !== g_vram_wr(ta)) mismatch("vram write lock");
-                if (term_m0_next !== g_m0(ta))          mismatch("mode 0 condition");
-                if (term_m1_next !== g_m1(ta))          mismatch("mode 1 condition");
-                if (term_m2_next !== g_m2(ta))          mismatch("mode 2 condition");
+                if (term_m0_next !== g_m0(tv))          mismatch("mode 0 condition");
+                if (term_m1_next !== g_m1(tv))          mismatch("mode 1 condition");
+                if (term_m2_next !== g_m2(tv))          mismatch("mode 2 condition");
                 if (mode_next !== g_eng(ta))            mismatch("engine mode");
                 if (ly_next !== g_ly(ta))               mismatch("engine ly");
                 // the strobes belong to the edge itself, so the t before it

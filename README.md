@@ -1,120 +1,82 @@
-# Game Boy (DMG) on an FPGA
+# GameBoy Emulator (Hardware Implementation)
 
-A Game Boy (DMG) written in Verilog that runs on a Digilent Basys 3 (Artix-7 XC7A35T). It boots the original boot ROM, plays a cartridge image from block RAM, draws the picture over VGA and takes input from a USB keyboard. The first game we ran on it was Tetris.
+An in-progress hardware implementation of the original GameBoy's SM83 CPU core in Verilog, built as my Capstone project for ECE. The goal is a synthesizable core capable of fetching, decoding, and executing SM83 instructions against a mapped memory space, eventually extending toward a full GameBoy-on-FPGA system.
 
-Built for **ECE 4333 (Capstone)** at Texas Tech University by Aaron Luebbert and Jordie Bellar.
-
-| Owner | Blocks |
-|---|---|
-| Aaron Luebbert | bus and memory map, cartridge, WRAM and HRAM, PPU, OAM DMA, video and VGA, joypad, clocking, FPGA integration |
-| Jordie Bellar | SM83 CPU, interrupt controller, timer, debug UART and bring-up |
-
-## Status
-
-- Boots the DMG boot ROM, then runs a 32 KB ROM-only cartridge (Tetris) on the Basys 3.
-- 160 x 144 picture, 4 shades, scaled 3x to 480 x 432 and centered in a 640 x 480 @ ~59.5 Hz VGA signal.
-- One 100 MHz clock drives everything. The Game Boy runs on clock enables, so there are no derived clocks.
-- Post-implementation: about 15% of the LUTs and 30% of the block RAM, timing met at 100 MHz.
-
-Not built: audio (APU), serial link, cartridge mappers (MBC) and cartridge RAM, and Game Boy Color. Reads from the missing I/O registers return `FF` and writes are ignored.
-
-## Controls
-
-Plug a USB keyboard into the Basys 3 USB port (the board's USB host chip presents it to the FPGA as PS/2). The layout is the default used by mGBA, RetroArch and most other emulators.
-
-| Game Boy | Keyboard | Basys 3 board |
-|---|---|---|
-| D-pad | Arrow keys | `btnU` `btnD` `btnL` `btnR` |
-| A | `X` | `sw0` |
-| B | `Z` | `sw1` |
-| Select | `Backspace` or either `Shift` | `sw2` |
-| Start | `Enter` | `sw3` |
-| Reset | - | `btnC` (replays the boot ROM) |
-
-The keyboard and the board buttons work at the same time. The 16 LEDs show the CPU address bus, so a running machine flickers and a stuck CPU holds a pattern.
+**Status: work in progress.** The CPU core currently implements a working fetch/decode/execute pipeline with a meaningful subset of the SM83 instruction set; large parts of the system (PPU, timers, interrupts, I/O registers, cartridge MBC support) are not yet implemented. See [Scope](#scope) below for exactly what's covered today.
 
 ## Architecture
 
 ```
-                         100 MHz clk
-                              |
-                          clk_div --> ce_gb (4.194304 MHz, one T-cycle)
-                              |       ce_m  (every 4th ce_gb, one M-cycle)
-                              |       ce_vga (25 MHz)
-                              v
-   +-----+   bus   +------------+----+---------+-----------------------+
-   | cpu |<------->| memory_map |    |  cartridge  (boot ROM + 32 KB ROM)|
-   +--+--+         | (decode +  |    |  wram, hram                       |
-      |            |  read mux) |    |  ppu (vram, oam, registers)       |
-      |            +------------+    |  oam_dma                          |
-      |                              |  timer, joypad                    |
-      +-- interrupt_ctrl <-----------+                                   |
-                                     +-----------------------------------+
-                                            |
-                                  ppu --> video --> VGA
+gb_top
+├── cpu           # SM83 CPU core: fetch/decode/execute state machine
+└── memory_map    # Bus-connected ROM + WRAM
 ```
 
-Every peripheral commits its own write on `sel && we && ce_m`, and the CPU samples reads on `ce_m`. `docs/interface_contract.pdf` is the contract the blocks were built against, and the header comment of each module says how it applies it.
+`gb_top.v` wires the CPU and memory map together over a simple shared bus (16-bit address, 8-bit data in/out, single write-enable line). The CPU drives `addr`/`data_out`/`we`; `memory_map` drives `data_out` (read data) back to the CPU based on the requested address.
 
-The top level for the board is `rtl/fpga/gb_fpga_top.v`. It only adds the board pins, a power-on reset and input synchronizers around `rtl/gb_top.v`, the same `gb_top` the testbenches run.
+**Memory map (current):**
 
-## Repository layout
+| Range | Size | Contents |
+|---|---|---|
+| `0x0000`–`0x7FFF` | 32 KB | ROM (loaded from `rom.hex` via `$readmemh`) |
+| `0xC000`–`0xDFFF` | 8 KB | Work RAM |
+| everything else | — | reads as `0xFF` (unmapped) |
 
-```
-rtl/
-  gb_top.v          the machine
-  cpu/              SM83 core, interrupt controller
-  timer/            DIV, TIMA, TMA, TAC
-  clocking/         clock-enable generator
-  memory/           address decode, WRAM, HRAM
-  cartridge/        boot ROM overlay and 32 KB cartridge
-  ppu/              mode timing, registers, VRAM, OAM, OAM scan,
-                    pixel fetcher, OAM DMA, framebuffer, palette,
-                    VGA timing and scaler
-  joypad/           P1 register, PS/2 keyboard receiver
-  fpga/             gb_fpga_top (the real board top), plus the
-                    bring-up tops used to check the PPU and VGA path
-  debug/            UART and the Blargg bring-up top
-  bus/              bus_master.v, a simulation-only bus model
-tb/                 one self-checking testbench per module, plus
-                    full-system benches
-constraints/        basys3_gb.xdc for the full machine, the other
-                    .xdc files belong to the bring-up tops
-scripts/            Vivado project scripts and the Blargg runners
-docs/               interface contract and CPU interface diagram
-roms/               where you put your own ROM images (not tracked)
-```
+This mirrors the real GameBoy's ROM and WRAM regions but doesn't yet implement VRAM, OAM, echo RAM, I/O registers, or high RAM.
 
-## Build for the Basys 3
+## CPU core
 
-You need Vivado and your own ROM images. No ROMs are included, see [`roms/README.md`](roms/README.md) for the file names and format.
+The CPU (`rtl/cpu/cpu.v`) is a state-machine implementation (`FETCH` → `DECODE` → `EXECUTE`, with dedicated `FETCH_IMM`, `STACK_PUSH`, and `STACK_POP` states for multi-cycle operations) rather than a single-cycle design, matching how the real SM83 handles variable-length instructions and memory access timing.
 
-1. Put `boot_rom.hex` in `roms/boot/` and `cart_rom.hex` in `roms/game/`.
-2. In the Vivado Tcl console run `source <repo>/scripts/vivado/create_gb.tcl`. It creates the project outside the repo and adds the sources, the constraints and the ROM paths.
-3. Run Synthesis, Implementation and Generate Bitstream, then program the board from Hardware Manager.
-4. Connect a VGA monitor and a USB keyboard. Press `btnC` to restart.
+**Registers implemented:** `A`, `F` (flags: Z/N/H/C), `B`, `C`, `D`, `E`, `H`, `L`, `PC`, `SP`, and an internal instruction register (`IR`).
 
-`GB_VIVADO_DIR` changes where the project is created.
+**Instructions implemented so far:**
+- `LD r, r'` and `LD r, n` (register-to-register and immediate loads, including `(HL)` as a memory operand)
+- `INC r`, `DEC r` (register forms; `(HL)` memory form is stubbed, not yet wired)
+- `ADD A, r`, `SUB A, r`, `AND A, r`, `XOR A, r`, `OR A, r`, `CP A, r` (with correct Z/N/H/C flag behavior per operation)
+- `JP nn`, `JR n`, `JR cc, n` (all four condition codes: NZ, Z, NC, C)
+- `CALL nn`, `RET` (including stack push/pop of the 16-bit return address)
 
-## Simulation
+**Not yet implemented:** 16-bit register-pair loads/arithmetic, bit operations (`CB`-prefixed instruction set), rotates/shifts, `PUSH`/`POP` for general register pairs, interrupts (`RETI`, `EI`/`DI`), halt/stop, and the `(HL)` memory operand for `INC`/`DEC`.
 
-Each module has a self-checking testbench in `tb/` that prints `ALL ... CHECKS PASSED` or lists the failures. With Icarus Verilog, for example:
+## Verification
+
+`tb/cpu/tb_cpu.v` is a minimal testbench: it backs the CPU with a full 64 KB behavioral RAM array, hand-loads a few bytes (a `CALL` immediately followed by a `JP` back to itself, then a `RET`) to exercise the stack push/pop and jump paths, and dumps waveforms for inspection. It's a smoke test at this stage, not a coverage suite — no golden-model comparison or per-instruction test cases yet.
+
+To run it with Icarus Verilog:
 
 ```bash
-mkdir -p sim
-iverilog -g2005 -o sim/tb_ps2_keys tb/joypad/tb_ps2_keys.v rtl/joypad/ps2_keys.v
-vvp sim/tb_ps2_keys
+iverilog -o sim/tb_cpu tb/cpu/tb_cpu.v rtl/cpu/cpu.v
+vvp sim/tb_cpu
+gtkwave sim/waves/tb_cpu.vcd
 ```
 
-The PPU and bus testbenches use `rtl/bus/bus_master.v` and the PPU files they exercise, so add those to the command line. `sim/` holds build output and is not tracked.
+(`sim/` is git-ignored — waveform output and build artifacts stay local.)
 
-For the whole machine, `tb/tb_gb_boot.v` runs `gb_top` under Verilator and dumps frames, and `scripts/run_blargg_system.sh` runs the Blargg `cpu_instrs` and `instr_timing` ROMs through it. `scripts/run_blargg.sh` runs the same ROMs on the CPU, timer and interrupt controller alone. Both expect the Blargg ROMs in a `blargg/` folder at the repository root.
+## Repo structure
 
-## Documents
+```
+.
+├── docs/
+│   └── cpu_interface.drawio   # CPU/bus interface diagram
+├── rtl/
+│   ├── bus/
+│   │   └── memory_map.v       # ROM + WRAM address decoding
+│   ├── cpu/
+│   │   └── cpu.v              # SM83 CPU core
+│   └── gb_top.v               # Top-level integration
+└── tb/
+    └── cpu/
+        └── tb_cpu.v           # CPU testbench
+```
 
-- `docs/interface_contract.pdf` - the bus, clock-enable and interrupt contract between the blocks.
-- `docs/cpu_interface.drawio` - CPU interface diagram.
+## Roadmap
 
-## Legal
-
-This project contains no Nintendo code or game data. The boot ROM and any cartridge image must be dumped from hardware you own. Game Boy and Tetris are trademarks of their owners and are used here only to describe compatibility.
+- [ ] Finish the remaining SM83 instruction set (16-bit ops, CB-prefixed bit ops, rotates/shifts, interrupts)
+- [ ] `(HL)` memory operand support for INC/DEC
+- [ ] PPU (background/window/sprite rendering)
+- [ ] Timer and interrupt controller
+- [ ] I/O register space and joypad input
+- [ ] Cartridge MBC support (beyond flat 32 KB ROM)
+- [ ] Per-instruction testbenches with expected-state checks (moving beyond the current smoke test)
+- [ ] FPGA target integration (part of the broader capstone handheld build)

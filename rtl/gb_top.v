@@ -111,7 +111,7 @@ module gb_top #(
 
     wire [7:0] cart_data_out, wram_data_out, hram_data_out;
     wire [7:0] ppu_vram_data_out, ppu_oam_data_out, ppu_reg_data_out;
-    wire [7:0] oam_dma_data_out, joypad_data_out, timer_data_out, ic_data_out;
+    wire [7:0] oam_dma_data_out, joypad_data_out, timer_data_out, ic_data_out, ic_view;
     wire [7:0] mm_data_in;
 
     memory_map u_memory_map (
@@ -129,7 +129,7 @@ module gb_top #(
         .sel_joypad (sel_joypad),                   .joypad_data_out (joypad_data_out),
         .sel_serial (sel_serial),                   .serial_data_out (8'hFF),
         .sel_timer (sel_timer),                     .timer_data_out (timer_data_out),
-        .sel_interrupt_ctrl (sel_interrupt_ctrl),   .interrupt_ctrl_data_out (ic_data_out),
+        .sel_interrupt_ctrl (sel_interrupt_ctrl),   .interrupt_ctrl_data_out (ic_view),
         .sel_apu (sel_apu),                         .apu_data_out (8'hFF),
         .sel_hram (sel_hram),                       .hram_data_out (hram_data_out)
     );
@@ -204,7 +204,7 @@ module gb_top #(
     // ------------------------------------------------------------------------
     // ppu and video
     // ------------------------------------------------------------------------
-    wire       pixel_valid, irq_vblank, irq_lcdstat;
+    wire       pixel_valid, irq_vblank, irq_lcdstat, irq_vblank_view, irq_lcdstat_view;
     wire [1:0] pixel_color, pixel_shade;
     wire [7:0] pixel_x, pixel_y;
 
@@ -219,7 +219,8 @@ module gb_top #(
         .pixel_valid (pixel_valid), .pixel_color (pixel_color),
         .pixel_shade (pixel_shade), .pixel_x (pixel_x), .pixel_y (pixel_y),
         .lcd_on (lcd_on),
-        .irq_vblank (irq_vblank), .irq_lcdstat (irq_lcdstat)
+        .irq_vblank (irq_vblank), .irq_lcdstat (irq_lcdstat),
+        .irq_vblank_view (irq_vblank_view), .irq_lcdstat_view (irq_lcdstat_view)
     );
 
     video #(.GREEN (GREEN)) u_video (
@@ -234,7 +235,15 @@ module gb_top #(
     // ------------------------------------------------------------------------
     // interrupts, timer, joypad
     // ------------------------------------------------------------------------
-    wire irq_timer, irq_joypad;
+    wire irq_timer, irq_joypad, irq_timer_view, irq_joypad_view;
+
+    // ff0f read view. interrupt_ctrl folds the irq strobes into its data_out only
+    // when ce_gb is high, but the cpu samples the clock before the ce_m edge where
+    // ce_gb is low. so build the view here from the ungated strobes, with the
+    // dispatch clear applied the same way. ie reads keep the interrupt_ctrl value
+    wire [4:0] ic_irq_view = {irq_joypad_view, 1'b0, irq_timer_view, irq_lcdstat_view, irq_vblank_view};
+    wire [4:0] ic_if_view  = (if_reg_wire[4:0] & ~(if_clear_we_wire ? if_clear_wire[4:0] : 5'b0)) | ic_irq_view;
+    assign ic_view         = (cpu_addr == 16'hFFFF) ? ic_data_out : {3'b111, ic_if_view};
 
     interrupt_ctrl u_interrupt_ctrl (
         .clk (clk_100m), .rst (rst), .ce_gb (ce_gb), .ce_m (ce_m),
@@ -251,7 +260,7 @@ module gb_top #(
         .clk (clk_100m), .rst (rst), .ce_gb (ce_gb), .ce_m (ce_m),
         .addr (cpu_addr), .data_in (cpu_data_out), .we (cpu_we),
         .sel (sel_timer), .data_out (timer_data_out), .stall (),
-        .irq_timer (irq_timer)
+        .irq_timer (irq_timer), .irq_timer_view (irq_timer_view)
     );
 
     joypad u_joypad (
@@ -262,7 +271,7 @@ module gb_top #(
         .btn_up (btn_up), .btn_down (btn_down),
         .btn_a (btn_a), .btn_b (btn_b),
         .btn_select (btn_select), .btn_start (btn_start),
-        .irq_joypad (irq_joypad)
+        .irq_joypad (irq_joypad), .irq_joypad_view (irq_joypad_view)
     );
 
     // ------------------------------------------------------------------------
