@@ -64,6 +64,9 @@ module gb_top #(
 
     output wire        lcd_on,
 
+    // apu
+    output wire        audio_pin,
+
     // debug
     output wire [15:0] debug_cpu_addr,
     output wire [7:0]  debug_cpu_data_out,
@@ -113,6 +116,9 @@ module gb_top #(
     wire [7:0] ppu_vram_data_out, ppu_oam_data_out, ppu_reg_data_out;
     wire [7:0] oam_dma_data_out, joypad_data_out, timer_data_out, ic_data_out;
     wire [7:0] mm_data_in;
+    wire [7:0] apu_rdata;
+    wire [9:0] apu_sample;
+    wire       apu_wr = cpu_we & ce_m;
 
     memory_map u_memory_map (
         .addr (cpu_addr), .data_out (cpu_data_out), .data_in (mm_data_in), .we (cpu_we),
@@ -130,7 +136,7 @@ module gb_top #(
         .sel_serial (sel_serial),                   .serial_data_out (8'hFF),
         .sel_timer (sel_timer),                     .timer_data_out (timer_data_out),
         .sel_interrupt_ctrl (sel_interrupt_ctrl),   .interrupt_ctrl_data_out (ic_data_out),
-        .sel_apu (sel_apu),                         .apu_data_out (8'hFF),
+        .sel_apu (sel_apu),                         .apu_data_out (apu_rdata),
         .sel_hram (sel_hram),                       .hram_data_out (hram_data_out)
     );
 
@@ -263,6 +269,27 @@ module gb_top #(
         .btn_a (btn_a), .btn_b (btn_b),
         .btn_select (btn_select), .btn_start (btn_start),
         .irq_joypad (irq_joypad)
+    );
+
+    // ------------------------------------------------------------------------
+    // audio / APU
+    // ------------------------------------------------------------------------
+
+    apu u_apu (
+        .clk   (clk_100m),
+        .ce_gb (ce_gb),
+        .addr  (cpu_addr[5:0]),
+        .sel   (sel_apu),
+        .wr    (apu_wr),
+        .wdata (cpu_data_out),
+        .rdata (apu_rdata),
+        .sample(apu_sample)
+    );
+
+    audio_out #(.W(10)) u_audio (
+        .clk   (clk_100m),
+        .sample(apu_sample),
+        .pin   (audio_pin)
     );
 
     // ------------------------------------------------------------------------
