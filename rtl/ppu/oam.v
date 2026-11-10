@@ -94,8 +94,13 @@ module oam (
     // object n starts at byte 4n. an index above 39 reads as all ones
     wire [7:0] entry_base = {entry_idx, 2'b00};
     wire       entry_ok   = (entry_idx < 6'd40);
-    assign entry_data = entry_ok ? {mem[entry_base + 8'd3], mem[entry_base + 8'd2],
-                                    mem[entry_base + 8'd1], mem[entry_base]}
-                                 : 32'hFFFF_FFFF;
-
-endmodule
+    // registered every clock to cut the oam read mux from the scan's list
+    // logic. entry_idx only changes on ce_gb and the scan only samples on
+    // ce_gb, 23+ clocks later, so the extra clock is invisible at gb timing
+    reg [31:0] entry_q;
+    always @(posedge clk)
+        entry_q <= entry_ok ? {mem[entry_base + 8'd3], mem[entry_base + 8'd2],
+                               mem[entry_base + 8'd1], mem[entry_base]}
+                            : 32'hFFFF_FFFF;
+    assign entry_data = entry_q;
+endmodule

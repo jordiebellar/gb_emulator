@@ -87,6 +87,7 @@ module tb_vram;
     task check_render(input [12:0] a, input [7:0] expected, input [8*72:1] label);
         begin
             render_addr = a;
+            @(posedge clk);
             #1;
             checks = checks + 1;
             if (render_data !== expected) begin
@@ -185,4 +186,4 @@ module tb_vram;
         $finish;
     end
 
-endmodule
+endmodule

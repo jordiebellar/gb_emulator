@@ -104,7 +104,9 @@ module ppu (
     output wire        lcd_on,
 
     output wire        irq_vblank,
-    output wire        irq_lcdstat
+    output wire        irq_lcdstat,
+    output wire        irq_vblank_view,
+    output wire        irq_lcdstat_view
 );
 
     wire [1:0]  mode;
@@ -183,7 +185,8 @@ module ppu (
         .entering_hblank   (entering_hblank),
         .entering_oam_scan (entering_oam_scan),
         .entering_vblank   (entering_vblank),
-        .irq_vblank        (irq_vblank)
+        .irq_vblank        (irq_vblank),
+        .irq_vblank_view   (irq_vblank_view)
     );
 
     ppu_oam_scan u_scan (
@@ -251,7 +254,8 @@ module ppu (
         .obp1_out          (obp1),
         .wy_out            (wy),
         .wx_out            (wx),
-        .irq_lcdstat       (irq_lcdstat)
+        .irq_lcdstat       (irq_lcdstat),
+        .irq_lcdstat_view  (irq_lcdstat_view)
     );
 
     vram u_vram (
