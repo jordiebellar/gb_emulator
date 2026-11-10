@@ -53,9 +53,11 @@ module tb_cartridge;
         .CART_ROM_FILE("cart_boundary.hex")
     ) dut (
         .clk(clk), .ce_gb(1'b0), .ce_m(ce_m), .rst(rst),
-        .addr(addr), .data_in(wdata), .we(we),
+        .addr(addr), .cpu_addr(addr), .data_in(wdata), .we(we),
         .sel_cart_rom(sel_cart_rom), .sel_boot_disable(sel_boot_disable),
-        .data_out(data_out), .stall(stall)
+        .rom_rd(1'b0), .mbc_wr(1'b0), .sel_cart_ram(1'b0), .ram_we(1'b0),
+        .data_out(data_out), .ram_data_out(), .stall(stall),
+        .sd_cs_n(), .sd_sck(), .sd_mosi(), .sd_miso(1'b1), .status()
     );
 
     integer errors = 0;

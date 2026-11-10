@@ -115,6 +115,7 @@ module tb_oam;
     task check_entry(input [5:0] idx, input [31:0] expected, input [8*100:1] label);
         begin
             entry_idx = idx;
+            @(posedge clk);
             #1;
             checks = checks + 1;
             if (entry_data !== expected) begin

@@ -6,7 +6,8 @@
 #                the rom hex files are passed to gb_fpga_top as absolute paths
 #                so $readmemh can't silently miss them during synthesis.
 #                run from the vivado tcl console:  source <repo>/scripts/vivado/create_gb.tcl
-#                GB_VIVADO_DIR overrides where the project is made.
+#                GB_VIVADO_DIR overrides where the project is made. GB_SD_MODE=1
+#                builds the sd card cartridge (default 0, the rom in block ram).
 # =============================================================================
 
 set repo [file normalize [file join [file dirname [info script]] .. ..]]
@@ -31,7 +32,11 @@ add_files -norecurse [concat \
           $repo/rtl/memory/wram.v \
           $repo/rtl/memory/hram.v \
           $repo/rtl/cartridge/cartridge.v \
-          $repo/rtl/joypad/joypad.v] \
+          $repo/rtl/cartridge/sd_spi.v \
+          $repo/rtl/cartridge/mbc.v \
+          $repo/rtl/cartridge/rtc.v \
+          $repo/rtl/joypad/joypad.v \
+          $repo/rtl/joypad/ps2_keys.v] \
     [glob $repo/rtl/ppu/*.v]]
 
 add_files -fileset constrs_1 -norecurse $repo/constraints/basys3_gb.xdc
@@ -41,7 +46,10 @@ set cart_hex $repo/roms/game/cart_rom.hex
 foreach f [list $boot_hex $cart_hex] {
     if {![file exists $f]} { error "missing rom file: $f" }
 }
-set_property generic "BOOT_ROM_FILE=\"$boot_hex\" CART_ROM_FILE=\"$cart_hex\"" [current_fileset]
+# GB_SD_MODE=1 builds the sd card cartridge instead of the rom in block ram
+set sd_mode 0
+if {[info exists ::env(GB_SD_MODE)]} { set sd_mode $::env(GB_SD_MODE) }
+set_property generic "BOOT_ROM_FILE=\"$boot_hex\" CART_ROM_FILE=\"$cart_hex\" SD_MODE=$sd_mode" [current_fileset]
 
 set_property top gb_fpga_top [current_fileset]
 update_compile_order -fileset sources_1

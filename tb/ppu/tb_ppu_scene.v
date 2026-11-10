@@ -48,11 +48,18 @@ module tb_ppu_scene;
     wire [7:0]  cpu_wdata;
     wire        we, bm_sel, bm_late;
 
+    // ce_gb every other clock, so the one clock read latency of the vram and oam
+    // ports is hidden the way the real 24 clock spacing hides it. ce_m is
+    // every fourth ce_gb and lands on a ce_gb clock
+    reg       ph = 1'b0;
     reg [1:0] m_cnt;
-    wire      ce_gb = 1'b1;
-    wire      ce_m  = (m_cnt == 2'd3);
+    wire      ce_gb = ph;
+    wire      ce_m  = ph && (m_cnt == 2'd3);
     initial m_cnt = 2'd0;
-    always @(posedge clk) m_cnt <= m_cnt + 2'd1;
+    always @(posedge clk) begin
+        ph <= ~ph;
+        if (ph) m_cnt <= m_cnt + 2'd1;
+    end
 
     initial clk = 1'b0;
     always #5 clk = ~clk;
@@ -298,7 +305,7 @@ module tb_ppu_scene;
     integer    got_cnt   [0:23039];
     integer    got_m3    [0:143];
     always @(posedge clk) begin
-        if (cap_en) begin
+        if (cap_en && ce_gb) begin
             if (pixel_valid && pixel_y < 144 && pixel_x < 160) begin
                 got_shade[pixel_y * 160 + pixel_x] = pixel_shade;
                 got_cnt  [pixel_y * 160 + pixel_x] = got_cnt[pixel_y * 160 + pixel_x] + 1;

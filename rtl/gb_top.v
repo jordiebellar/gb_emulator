@@ -10,7 +10,8 @@
 //                  commits its own write on sel && we && ce_m.
 //
 //                  peripherals on the bus
-//                    - cartridge, boot rom overlay plus 32kb rom
+//                    - cartridge, boot rom overlay, the game rom (block ram or an
+//                      sd card), the mapper and cart ram
 //                    - wram and hram
 //                    - ppu, vram oam and the ppu registers, plus video
 //                    - oam dma unit at ff46
@@ -31,7 +32,8 @@
 //                  c0-df in the dma unit). pages 80-bf read ff, vram as a
 //                  dma source is not supported because the ppu has one
 //                  address port.
-// Revision     : 2.0 - rewritten for contract rev 2. cpu with ce_m, ppu and
+// Revision     : 2.1 - sd card cartridge, mapper, clock enable hold
+//                  2.0 - rewritten for contract rev 2. cpu with ce_m, ppu and
 //                  video, oam dma steering, interrupt_ctrl, timer, joypad.
 //                  1.0 - first integration, cpu on the raw clock
 // =============================================================================
@@ -40,7 +42,16 @@
 module gb_top #(
     parameter BOOT_ROM_FILE = "roms/boot/boot_rom.hex",
     parameter CART_ROM_FILE = "roms/game/cart_rom.hex",
-    parameter GREEN         = 1
+    parameter GREEN         = 1,
+    // cartridge, see cartridge.v. the defaults are the old 32kb rom in block ram
+    parameter integer SD_MODE     = 0,
+    parameter integer ROM_BYTES   = 32768,
+    parameter integer RAM_BYTES   = 8192,
+    parameter integer CACHE_LINES = 64,
+    parameter [15:0]  SD_DIV_SLOW = 16'd125,
+    parameter [15:0]  SD_DIV_FAST = 16'd2,
+    parameter integer SD_PWR_CLKS = 100000,
+    parameter integer RTC_TICKS   = 100000000
 ) (
     input  wire        clk_100m,
     input  wire        rst,
@@ -64,6 +75,13 @@ module gb_top #(
 
     output wire        lcd_on,
 
+    // sd card cartridge, idle when SD_MODE is 0
+    output wire        sd_cs_n,
+    output wire        sd_sck,
+    output wire        sd_mosi,
+    input  wire        sd_miso,
+    output wire [2:0]  cart_status,
+
     // apu
     output wire        audio_pin,
 
@@ -81,9 +99,10 @@ module gb_top #(
     // clocks
     // ------------------------------------------------------------------------
     wire ce_gb, ce_m, ce_vga;
+    wire cart_stall;
 
     clk_div u_clk_div (
-        .clk_100m (clk_100m), .rst (rst),
+        .clk_100m (clk_100m), .rst (rst), .hold (cart_stall),
         .ce_gb (ce_gb), .ce_m (ce_m), .ce_vga (ce_vga)
     );
 
@@ -112,9 +131,9 @@ module gb_top #(
     wire sel_ppu_vram, sel_ppu_oam, sel_ppu_reg, sel_oam_dma;
     wire sel_joypad, sel_serial, sel_timer, sel_interrupt_ctrl, sel_apu, sel_hram;
 
-    wire [7:0] cart_data_out, wram_data_out, hram_data_out;
+    wire [7:0] cart_data_out, cart_ram_data_out, wram_data_out, hram_data_out;
     wire [7:0] ppu_vram_data_out, ppu_oam_data_out, ppu_reg_data_out;
-    wire [7:0] oam_dma_data_out, joypad_data_out, timer_data_out, ic_data_out;
+    wire [7:0] oam_dma_data_out, joypad_data_out, timer_data_out, ic_data_out, ic_view;
     wire [7:0] mm_data_in;
     wire [7:0] apu_rdata;
     wire [9:0] apu_sample;
@@ -126,7 +145,7 @@ module gb_top #(
         .sel_cart_rom (sel_cart_rom),               .cart_rom_data_out (cart_data_out),
         // the cartridge answers ff on its own boot disable select
         .sel_boot_disable (sel_boot_disable),       .boot_disable_data_out (8'hFF),
-        .sel_cart_ram (sel_cart_ram),               .cart_ram_data_out (8'hFF),
+        .sel_cart_ram (sel_cart_ram),               .cart_ram_data_out (cart_ram_data_out),
         .sel_wram (sel_wram),                       .wram_data_out (wram_data_out),
         .sel_ppu_vram (sel_ppu_vram),               .ppu_vram_data_out (ppu_vram_data_out),
         .sel_ppu_oam (sel_ppu_oam),                 .ppu_oam_data_out (ppu_oam_data_out),
@@ -137,6 +156,8 @@ module gb_top #(
         .sel_timer (sel_timer),                     .timer_data_out (timer_data_out),
         .sel_interrupt_ctrl (sel_interrupt_ctrl),   .interrupt_ctrl_data_out (ic_data_out),
         .sel_apu (sel_apu),                         .apu_data_out (apu_rdata),
+        .sel_interrupt_ctrl (sel_interrupt_ctrl),   .interrupt_ctrl_data_out (ic_view),
+        .sel_apu (sel_apu),                         .apu_data_out (8'hFF),
         .sel_hram (sel_hram),                       .hram_data_out (hram_data_out)
     );
 
@@ -186,13 +207,26 @@ module gb_top #(
     // ------------------------------------------------------------------------
     // memory
     // ------------------------------------------------------------------------
+    // a rom read is in progress, from the cpu or from the dma unit. writes into
+    // the rom space are mapper writes, and only the cpu makes them
+    wire cart_rom_rd = dma_active ? dma_src_rom : (sel_cart_rom & ~cpu_we);
+    wire cart_mbc_wr = cpu_we & sel_cart_rom & ~dma_active;
+    wire cart_ram_we = cpu_we & ~dma_active;
+
     cartridge #(
-        .BOOT_ROM_FILE (BOOT_ROM_FILE), .CART_ROM_FILE (CART_ROM_FILE)
+        .BOOT_ROM_FILE (BOOT_ROM_FILE), .CART_ROM_FILE (CART_ROM_FILE),
+        .SD_MODE (SD_MODE), .ROM_BYTES (ROM_BYTES), .RAM_BYTES (RAM_BYTES),
+        .CACHE_LINES (CACHE_LINES), .SD_DIV_SLOW (SD_DIV_SLOW), .SD_DIV_FAST (SD_DIV_FAST),
+        .SD_PWR_CLKS (SD_PWR_CLKS), .RTC_TICKS (RTC_TICKS)
     ) u_cartridge (
         .clk (clk_100m), .ce_gb (ce_gb), .ce_m (ce_m), .rst (rst),
-        .addr (mem_addr), .data_in (cpu_data_out), .we (cpu_we),
+        .addr (mem_addr), .cpu_addr (cpu_addr), .data_in (cpu_data_out), .we (cpu_we),
         .sel_cart_rom (cart_sel_rom_eff), .sel_boot_disable (sel_boot_disable),
-        .data_out (cart_data_out), .stall ()
+        .rom_rd (cart_rom_rd), .mbc_wr (cart_mbc_wr),
+        .sel_cart_ram (sel_cart_ram), .ram_we (cart_ram_we),
+        .data_out (cart_data_out), .ram_data_out (cart_ram_data_out), .stall (cart_stall),
+        .sd_cs_n (sd_cs_n), .sd_sck (sd_sck), .sd_mosi (sd_mosi), .sd_miso (sd_miso),
+        .status (cart_status)
     );
 
     wram u_wram (
@@ -210,7 +244,7 @@ module gb_top #(
     // ------------------------------------------------------------------------
     // ppu and video
     // ------------------------------------------------------------------------
-    wire       pixel_valid, irq_vblank, irq_lcdstat;
+    wire       pixel_valid, irq_vblank, irq_lcdstat, irq_vblank_view, irq_lcdstat_view;
     wire [1:0] pixel_color, pixel_shade;
     wire [7:0] pixel_x, pixel_y;
 
@@ -225,7 +259,8 @@ module gb_top #(
         .pixel_valid (pixel_valid), .pixel_color (pixel_color),
         .pixel_shade (pixel_shade), .pixel_x (pixel_x), .pixel_y (pixel_y),
         .lcd_on (lcd_on),
-        .irq_vblank (irq_vblank), .irq_lcdstat (irq_lcdstat)
+        .irq_vblank (irq_vblank), .irq_lcdstat (irq_lcdstat),
+        .irq_vblank_view (irq_vblank_view), .irq_lcdstat_view (irq_lcdstat_view)
     );
 
     video #(.GREEN (GREEN)) u_video (
@@ -240,7 +275,15 @@ module gb_top #(
     // ------------------------------------------------------------------------
     // interrupts, timer, joypad
     // ------------------------------------------------------------------------
-    wire irq_timer, irq_joypad;
+    wire irq_timer, irq_joypad, irq_timer_view, irq_joypad_view;
+
+    // ff0f read view. interrupt_ctrl folds the irq strobes into its data_out only
+    // when ce_gb is high, but the cpu samples the clock before the ce_m edge where
+    // ce_gb is low. so build the view here from the ungated strobes, with the
+    // dispatch clear applied the same way. ie reads keep the interrupt_ctrl value
+    wire [4:0] ic_irq_view = {irq_joypad_view, 1'b0, irq_timer_view, irq_lcdstat_view, irq_vblank_view};
+    wire [4:0] ic_if_view  = (if_reg_wire[4:0] & ~(if_clear_we_wire ? if_clear_wire[4:0] : 5'b0)) | ic_irq_view;
+    assign ic_view         = (cpu_addr == 16'hFFFF) ? ic_data_out : {3'b111, ic_if_view};
 
     interrupt_ctrl u_interrupt_ctrl (
         .clk (clk_100m), .rst (rst), .ce_gb (ce_gb), .ce_m (ce_m),
@@ -257,7 +300,7 @@ module gb_top #(
         .clk (clk_100m), .rst (rst), .ce_gb (ce_gb), .ce_m (ce_m),
         .addr (cpu_addr), .data_in (cpu_data_out), .we (cpu_we),
         .sel (sel_timer), .data_out (timer_data_out), .stall (),
-        .irq_timer (irq_timer)
+        .irq_timer (irq_timer), .irq_timer_view (irq_timer_view)
     );
 
     joypad u_joypad (
@@ -268,7 +311,7 @@ module gb_top #(
         .btn_up (btn_up), .btn_down (btn_down),
         .btn_a (btn_a), .btn_b (btn_b),
         .btn_select (btn_select), .btn_start (btn_start),
-        .irq_joypad (irq_joypad)
+        .irq_joypad (irq_joypad), .irq_joypad_view (irq_joypad_view)
     );
 
     // ------------------------------------------------------------------------

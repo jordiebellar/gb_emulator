@@ -11,14 +11,19 @@
 //                  per interface contract rev 2 section 6; ce_vga at
 //                  25MHz for the video subsystem. all derived from the
 //                  single real 100MHz clk_100m, not separate physical
-//                  clocks.
-// Revision     : 2.0 - added ce_m per rev 2 of the interface contract
+//                  clocks. hold stops ce_gb and so ce_m, which pauses the whole
+//                  machine while the cartridge fetches from the sd card. the
+//                  phase accumulator keeps running, a held pulse is just
+//                  lost, ce_vga is not affected
+// Revision     : 2.1 - hold input for the sd cartridge
+//                  2.0 - added ce_m per rev 2 of the interface contract
 // =============================================================================
 `timescale 1ns / 1ps
 
 module clk_div (
     input  wire clk_100m,
     input  wire rst,
+    input  wire hold,
     output reg  ce_gb,
     output wire ce_m,
     output reg  ce_vga
@@ -37,7 +42,7 @@ module clk_div (
         end
         else begin
             gb_acc <= gb_acc_next[W-1:0];
-            ce_gb  <= gb_acc_next[W];
+            ce_gb  <= gb_acc_next[W] & ~hold;
         end
     end
 

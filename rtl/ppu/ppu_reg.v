@@ -98,7 +98,8 @@ module ppu_reg (
     output wire [7:0]  obp1_out,
     output wire [7:0]  wy_out,
     output wire [7:0]  wx_out,
-    output wire        irq_lcdstat
+    output wire        irq_lcdstat,
+    output wire        irq_lcdstat_view  // irq_lcdstat as the next tick would raise it, tick or no tick
 );
 
     assign stall = 1'b0;
@@ -177,8 +178,8 @@ module ppu_reg (
                              (cmp_off_next ? 1'b0 : (ly_cmp_next == lyc_next));
 
     always @(posedge clk or posedge rst) begin
-        if (rst) coincidence_r <= 1'b1;   // ly 0 == lyc 0 at power-on
-        else     coincidence_r <= coincidence_next;
+        if (rst)         coincidence_r <= 1'b1;   // ly 0 == lyc 0 at power-on
+        else if (ce_gb)  coincidence_r <= coincidence_next;
     end
 
     wire [7:0] stat_value = {1'b1, lyc_ie, mode2_ie, mode1_ie, mode0_ie, coincidence_next, stat_mode_next};
@@ -237,6 +238,7 @@ module ppu_reg (
     wire stat_line_wb = lcd_en && stat_wr && (term_m0_next || term_m1_next ||
                                               coincidence_next);
 
-    assign irq_lcdstat = ce_gb && (stat_line_n || stat_line_old || stat_line_wb) && !stat_line_r;
+    assign irq_lcdstat_view = (stat_line_n || stat_line_old || stat_line_wb) && !stat_line_r;
+    assign irq_lcdstat      = ce_gb && irq_lcdstat_view;
 
 endmodule

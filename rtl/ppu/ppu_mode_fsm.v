@@ -145,7 +145,8 @@ module ppu_mode_fsm (
     output wire       entering_hblank,
     output wire       entering_oam_scan,
     output wire       entering_vblank,
-    output wire       irq_vblank
+    output wire       irq_vblank,
+    output wire       irq_vblank_view  // irq_vblank as the next tick would raise it, tick or no tick
 );
 
     localparam MODE_HBLANK         = 2'd0;
@@ -181,52 +182,63 @@ module ppu_mode_fsm (
     assign entering_vblank   = ce_gb && lcd_en && (dot_counter == DOT_LAST) &&
                                 (ly_r == 8'd143);
     assign irq_vblank        = entering_vblank;
+    assign irq_vblank_view   = lcd_en && (dot_counter == DOT_LAST) && (ly_r == 8'd143);
 
-    // next state, computed once. the registers below only latch it
-    reg [8:0] dot_n;
-    reg [7:0] ly_n;
-    reg [1:0] mode_n;
-    reg       first_n;
+    // the state after the next ce_gb tick, whether or not a tick arrives on
+    // this clock. the cpu views below are built from these, so they read the
+    // same on every clock between two ticks and a read register can capture
+    // them early
+    reg [8:0] dot_a;
+    reg [7:0] ly_a;
+    reg [1:0] mode_a;
+    reg       first_a;
 
     always @(*) begin
-        dot_n   = dot_counter;
-        ly_n    = ly_r;
-        mode_n  = mode_r;
-        first_n = first_line_r;
-        if (ce_gb) begin
+        dot_a   = dot_counter;
+        ly_a    = ly_r;
+        mode_a  = mode_r;
+        first_a = first_line_r;
+        begin
             if (!lcd_en) begin
                 // idle at the start of line 0, ready to run the moment
                 // lcd_en rises
-                dot_n   = DOT_IDLE;
-                ly_n    = 8'd0;
-                mode_n  = MODE_HBLANK;
-                first_n = 1'b1;
+                dot_a   = DOT_IDLE;
+                ly_a    = 8'd0;
+                mode_a  = MODE_HBLANK;
+                first_a = 1'b1;
             end
             else if (dot_counter == DOT_LAST) begin
-                dot_n   = 9'd0;
-                first_n = 1'b0;
+                dot_a   = 9'd0;
+                first_a = 1'b0;
                 if (ly_r == 8'd153) begin
-                    ly_n   = 8'd0;
-                    mode_n = MODE_OAM_SCAN;
+                    ly_a   = 8'd0;
+                    mode_a = MODE_OAM_SCAN;
                 end
                 else begin
-                    ly_n = ly_r + 8'd1;
+                    ly_a = ly_r + 8'd1;
                     if (ly_r == 8'd143)
-                        mode_n = MODE_VBLANK;
+                        mode_a = MODE_VBLANK;
                     else if (ly_r < 8'd143)
-                        mode_n = MODE_OAM_SCAN;
+                        mode_a = MODE_OAM_SCAN;
                 end
             end
             else begin
-                dot_n = dot_counter + 9'd1;
+                dot_a = dot_counter + 9'd1;
                 if ((mode_r == MODE_OAM_SCAN || (first_line_r && mode_r == MODE_HBLANK)) &&
                     dot_counter == DOT_MODE3 - 9'd1)
-                    mode_n = MODE_PIXEL_TRANSFER;
+                    mode_a = MODE_PIXEL_TRANSFER;
                 else if (mode_r == MODE_PIXEL_TRANSFER && fifo_done)
-                    mode_n = MODE_HBLANK;
+                    mode_a = MODE_HBLANK;
             end
         end
     end
+
+    // what the registers below latch. a tick moves them to the advanced state,
+    // no tick leaves them alone
+    wire [8:0] dot_n   = ce_gb ? dot_a   : dot_counter;
+    wire [7:0] ly_n    = ce_gb ? ly_a    : ly_r;
+    wire [1:0] mode_n  = ce_gb ? mode_a  : mode_r;
+    wire       first_n = ce_gb ? first_a : first_line_r;
 
     assign mode_next = lcd_en ? mode_n : MODE_HBLANK;
     assign ly_next   = lcd_en ? ly_n   : 8'd0;
@@ -245,14 +257,20 @@ module ppu_mode_fsm (
     wire [1:0] stat_mode_n = (mode_d4_n == MODE_PIXEL_TRANSFER) ? mode_d1_n :
                              (mode_d4_n == MODE_VBLANK && ly_n == 8'd0) ? MODE_HBLANK :
                               mode_d4_n;
+    // the same after the next tick, tick or no tick. the views the cpu reads
+    // use this one, so a read register can capture them any time in the
+    // clocks before the ce_m edge and hold exactly what the edge would show
+    wire [1:0] stat_mode_a = (m_d3 == MODE_PIXEL_TRANSFER) ? mode_r :
+                             (m_d3 == MODE_VBLANK && ly_a == 8'd0) ? MODE_HBLANK :
+                              m_d3;
 
-    assign stat_mode_next   = lcd_en ? stat_mode_n : MODE_HBLANK;
+    assign stat_mode_next   = lcd_en ? stat_mode_a : MODE_HBLANK;
     assign ly_cpu_next      = !lcd_en ? 8'd0 :
-                               ((ly_n == 8'd153 && dot_n >= 9'd4) ? 8'd0 : ly_n);
+                               ((ly_a == 8'd153 && dot_a >= 9'd4) ? 8'd0 : ly_a);
     assign ly_cmp_next      = !lcd_en ? 8'd0 :
-                               ((ly_n == 8'd153 && dot_n >= 9'd8) ? 8'd0 : ly_n);
-    assign cmp_off_next     = lcd_en && ((dot_n < 9'd4 && ly_n != 8'd0) ||
-                                         (ly_n == 8'd153 && dot_n >= 9'd8 && dot_n < 9'd12));
+                               ((ly_a == 8'd153 && dot_a >= 9'd8) ? 8'd0 : ly_a);
+    assign cmp_off_next     = lcd_en && ((dot_a < 9'd4 && ly_a != 8'd0) ||
+                                         (ly_a == 8'd153 && dot_a >= 9'd8 && dot_a < 9'd12));
 
     // the locks start with the engine and end with the stat mode, so they
     // cover the dots where the engine is ahead of the stat mode. on the
@@ -260,9 +278,13 @@ module ppu_mode_fsm (
     wire engine_busy = (mode_n == MODE_PIXEL_TRANSFER);
     wire stat_busy   = (stat_mode_n == MODE_PIXEL_TRANSFER);
 
-    assign oam_blocked_next  = lcd_en && (stat_busy ||
-                                           (!first_n && (mode_n == MODE_OAM_SCAN || engine_busy)));
-    assign vram_blocked_next = lcd_en && (stat_busy || (!first_n && engine_busy));
+    // the read locks are cpu views too, so they use the advanced state
+    wire engine_busy_a = (mode_a == MODE_PIXEL_TRANSFER);
+    wire stat_busy_a   = (stat_mode_a == MODE_PIXEL_TRANSFER);
+
+    assign oam_blocked_next  = lcd_en && (stat_busy_a ||
+                                           (!first_a && (mode_a == MODE_OAM_SCAN || engine_busy_a)));
+    assign vram_blocked_next = lcd_en && (stat_busy_a || (!first_a && engine_busy_a));
 
     // writes lock later than reads. vram writes lock with the stat mode 3 and
     // oam writes with the stat mode 2, except that oam writes get through for
@@ -275,15 +297,16 @@ module ppu_mode_fsm (
     // the mode 0 condition rises 3 dots after the engine reaches mode 0 and
     // falls with it. on the first line there is no mode 0 condition until
     // mode 3 has run
-    wire [1:0] mode_d3_n = ce_gb ? m_d2 : m_d3;
-    assign term_m0_next = lcd_en && (mode_n == MODE_HBLANK) &&
-                           (mode_d3_n == MODE_HBLANK) &&
-                           !(first_n && dot_n < DOT_MODE3);
-    assign term_m1_next = lcd_en && (mode_n == MODE_VBLANK);
+    // these feed the stat line, which only acts on a tick, so they use the
+    // advanced state like the cpu views do. on a tick it is the same thing
+    assign term_m0_next = lcd_en && (mode_a == MODE_HBLANK) &&
+                           (m_d2 == MODE_HBLANK) &&
+                           !(first_a && dot_a < DOT_MODE3);
+    assign term_m1_next = lcd_en && (mode_a == MODE_VBLANK);
     // the mode 2 condition is a short pulse at the start of the scan. line 144
     // has the same pulse on hardware, alongside the vblank interrupt
-    assign term_m2_next = lcd_en && ((mode_n == MODE_OAM_SCAN && dot_n < 9'd4) ||
-                                      (ly_n == 8'd144 && dot_n < 9'd4));
+    assign term_m2_next = lcd_en && ((mode_a == MODE_OAM_SCAN && dot_a < 9'd4) ||
+                                      (ly_a == 8'd144 && dot_a < 9'd4));
 
     always @(posedge clk or posedge rst) begin
         if (rst) begin
