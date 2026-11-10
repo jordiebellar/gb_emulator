@@ -36,6 +36,10 @@
 //                  card holds the rom as a raw image from sector 0, no file
 //                  system. in that mode the leds show {sd error, bank 0 loaded,
 //                  card ready} on led15 to led13 and the cpu address on the rest.
+//                  2 is the same but the rom is read from the board's own qspi
+//                  flash, written at 0x300000 from the hardware manager, see
+//                  flash_rd.v. no card needed. same leds, {flash error, bank 0
+//                  loaded, flash ready}
 //
 //                  reset is held for 256 clocks at power up and for as long as
 //                  btnC is down. every input goes through a 2 flop
@@ -66,6 +70,15 @@ module gb_fpga_top #(
     output wire        sd_sck,
     output wire        sd_mosi,
     input  wire        sd_miso,
+
+    // onboard qspi flash, the cartridge when SD_MODE = 2. the clock goes out
+    // through STARTUPE2 inside flash_rd, so there is no sck port. dq2 and dq3
+    // are wp# and hold#, held high. idle in the other modes
+    output wire        qspi_cs_n,
+    output wire        qspi_dq0,
+    input  wire        qspi_dq1,
+    output wire        qspi_dq2,
+    output wire        qspi_dq3,
 
     output wire [3:0]  vgaRed,
     output wire [3:0]  vgaGreen,
@@ -117,6 +130,19 @@ module gb_fpga_top #(
     wire [15:0] cpu_addr;
     wire [2:0]  cart_status;
 
+    // the cartridge's spi pins go to the sd pmod, or to the flash in SD_MODE 2
+    localparam FLASH = (SD_MODE == 2);
+    wire cart_cs_n, cart_sck, cart_mosi, cart_miso;
+
+    assign sd_cs_n    = FLASH ? 1'b1 : cart_cs_n;
+    assign sd_sck     = FLASH ? 1'b0 : cart_sck;
+    assign sd_mosi    = FLASH ? 1'b1 : cart_mosi;
+    assign qspi_cs_n  = FLASH ? cart_cs_n : 1'b1;
+    assign qspi_dq0   = FLASH ? cart_mosi : 1'b1;
+    assign qspi_dq2   = 1'b1;
+    assign qspi_dq3   = 1'b1;
+    assign cart_miso  = FLASH ? qspi_dq1 : sd_miso;
+
     gb_top #(
         .BOOT_ROM_FILE (BOOT_ROM_FILE),
         .CART_ROM_FILE (CART_ROM_FILE),
@@ -143,10 +169,10 @@ module gb_fpga_top #(
 
         .audio_pin   (audio_pin),
 
-        .sd_cs_n     (sd_cs_n),
-        .sd_sck      (sd_sck),
-        .sd_mosi     (sd_mosi),
-        .sd_miso     (sd_miso),
+        .sd_cs_n     (cart_cs_n),
+        .sd_sck      (cart_sck),
+        .sd_mosi     (cart_mosi),
+        .sd_miso     (cart_miso),
         .cart_status (cart_status),
 
         .lcd_on             (),

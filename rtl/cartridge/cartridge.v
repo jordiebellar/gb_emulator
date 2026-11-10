@@ -14,6 +14,10 @@
 //                               CART_ROM_FILE. ROM_BYTES is its size, 32768
 //                               for a plain cartridge. the header is read from
 //                               it in the first few clocks after reset
+//                  SD_MODE = 2  same as 1 but the image is read from the basys 3
+//                               onboard qspi flash through flash_rd.v, from
+//                               0x300000 on. the sd pins carry the flash cs,
+//                               mosi and miso, and sd_sck stays low
 //                  SD_MODE = 1  the cartridge is an sd card in spi mode, see
 //                               sd_spi.v. the card holds the raw rom image from
 //                               sector 0. after reset the first 16 kb (bank 0,
@@ -66,6 +70,7 @@ module cartridge #(
     parameter [15:0]  SD_DIV_SLOW = 16'd125,
     parameter [15:0]  SD_DIV_FAST = 16'd2,
     parameter integer SD_PWR_CLKS = 100000,
+    parameter integer FL_HALF     = 4,
     parameter integer RTC_TICKS   = 100000000
 ) (
     input  wire        clk,
@@ -247,15 +252,29 @@ module cartridge #(
             wire [7:0]  sd_byte;
             wire [8:0]  sd_idx;
 
-            sd_spi #(
-                .DIV_SLOW (SD_DIV_SLOW), .DIV_FAST (SD_DIV_FAST), .PWR_CLKS (SD_PWR_CLKS)
-            ) u_sd (
-                .clk (clk), .rst (rst),
-                .sd_cs_n (sd_cs_n), .sd_sck (sd_sck), .sd_mosi (sd_mosi), .sd_miso (sd_miso),
-                .ready (sd_ready_w), .err (sd_err_w),
-                .rd_req (sd_req), .rd_sector (sd_sector), .busy (sd_busy),
-                .rd_valid (sd_valid), .rd_byte (sd_byte), .rd_idx (sd_idx), .rd_done (sd_done)
-            );
+            if (SD_MODE == 2) begin : g_flash
+                flash_rd #(
+                    .HALF (FL_HALF)
+                ) u_fl (
+                    .clk (clk), .rst (rst),
+                    .fl_cs_n (sd_cs_n), .fl_mosi (sd_mosi), .fl_miso (sd_miso),
+                    .ready (sd_ready_w), .err (sd_err_w),
+                    .rd_req (sd_req), .rd_sector (sd_sector), .busy (sd_busy),
+                    .rd_valid (sd_valid), .rd_byte (sd_byte), .rd_idx (sd_idx), .rd_done (sd_done)
+                );
+                assign sd_sck = 1'b0;
+            end
+            else begin : g_card
+                sd_spi #(
+                    .DIV_SLOW (SD_DIV_SLOW), .DIV_FAST (SD_DIV_FAST), .PWR_CLKS (SD_PWR_CLKS)
+                ) u_sd (
+                    .clk (clk), .rst (rst),
+                    .sd_cs_n (sd_cs_n), .sd_sck (sd_sck), .sd_mosi (sd_mosi), .sd_miso (sd_miso),
+                    .ready (sd_ready_w), .err (sd_err_w),
+                    .rd_req (sd_req), .rd_sector (sd_sector), .busy (sd_busy),
+                    .rd_valid (sd_valid), .rd_byte (sd_byte), .rd_idx (sd_idx), .rd_done (sd_done)
+                );
+            end
 
             // fill sequencer - bank 0 first, then one sector per miss
             localparam [2:0] F_WAIT = 3'd0, F_PREQ = 3'd1, F_PRUN = 3'd2, F_IDLE = 3'd3, F_RUN = 3'd4;

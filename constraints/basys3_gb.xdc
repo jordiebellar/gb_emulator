@@ -34,6 +34,14 @@ set_property -dict { PACKAGE_PIN L2 IOSTANDARD LVCMOS33 } [get_ports sd_mosi]
 set_property -dict { PACKAGE_PIN J2 IOSTANDARD LVCMOS33 PULLUP true } [get_ports sd_miso]
 set_property -dict { PACKAGE_PIN G2 IOSTANDARD LVCMOS33 } [get_ports sd_sck]
 
+## onboard qspi flash, the cartridge when SD_MODE = 2. dq2 and dq3 are wp#
+## and hold#, held high. idle high in the other modes
+set_property -dict { PACKAGE_PIN K19 IOSTANDARD LVCMOS33 } [get_ports qspi_cs_n]
+set_property -dict { PACKAGE_PIN D18 IOSTANDARD LVCMOS33 } [get_ports qspi_dq0]
+set_property -dict { PACKAGE_PIN D19 IOSTANDARD LVCMOS33 } [get_ports qspi_dq1]
+set_property -dict { PACKAGE_PIN G18 IOSTANDARD LVCMOS33 } [get_ports qspi_dq2]
+set_property -dict { PACKAGE_PIN F18 IOSTANDARD LVCMOS33 } [get_ports qspi_dq3]
+
 ## leds - low 16 bits of the cpu address bus
 set_property -dict { PACKAGE_PIN U16 IOSTANDARD LVCMOS33 } [get_ports {led[0]}]
 set_property -dict { PACKAGE_PIN E19 IOSTANDARD LVCMOS33 } [get_ports {led[1]}]
@@ -83,6 +91,7 @@ set_false_path -from [get_ports {PS2Clk PS2Data}]
 ## the card answers on the falling edge of sck, which is a divided clock enable
 ## inside the 100 mhz domain, so miso is just another synchronous input
 set_false_path -from [get_ports sd_miso]
+set_false_path -from [get_ports qspi_dq1]
 set_false_path -to   [get_ports {led[*]}]
 
 ## optional - only if the timing report shows setup failures inside the ppu.
@@ -98,6 +107,3 @@ set_property CONFIG_VOLTAGE 3.3 [current_design]
 set_property BITSTREAM.GENERAL.COMPRESS TRUE [current_design]
 set_property BITSTREAM.CONFIG.CONFIGRATE 33 [current_design]
 set_property CONFIG_MODE SPIx4 [current_design]
-
-set_property PACKAGE_PIN J1 [get_ports audio_pin]
-set_property IOSTANDARD LVCMOS33 [get_ports audio_pin]

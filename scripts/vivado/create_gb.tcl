@@ -7,7 +7,8 @@
 #                so $readmemh can't silently miss them during synthesis.
 #                run from the vivado tcl console:  source <repo>/scripts/vivado/create_gb.tcl
 #                GB_VIVADO_DIR overrides where the project is made. GB_SD_MODE=1
-#                builds the sd card cartridge (default 0, the rom in block ram).
+#                builds the sd card cartridge, GB_SD_MODE=2 the onboard flash one
+#                (default 0, the rom in block ram).
 # =============================================================================
 
 set repo [file normalize [file join [file dirname [info script]] .. ..]]
@@ -33,6 +34,7 @@ add_files -norecurse [concat \
           $repo/rtl/memory/hram.v \
           $repo/rtl/cartridge/cartridge.v \
           $repo/rtl/cartridge/sd_spi.v \
+          $repo/rtl/cartridge/flash_rd.v \
           $repo/rtl/cartridge/mbc.v \
           $repo/rtl/cartridge/rtc.v \
           $repo/rtl/joypad/joypad.v \
@@ -47,7 +49,8 @@ set cart_hex $repo/roms/game/cart_rom.hex
 foreach f [list $boot_hex $cart_hex] {
     if {![file exists $f]} { error "missing rom file: $f" }
 }
-# GB_SD_MODE=1 builds the sd card cartridge instead of the rom in block ram
+# GB_SD_MODE=1 builds the sd card cartridge instead of the rom in block ram,
+# GB_SD_MODE=2 the qspi flash cartridge
 set sd_mode 0
 if {[info exists ::env(GB_SD_MODE)]} { set sd_mode $::env(GB_SD_MODE) }
 set_property generic "BOOT_ROM_FILE=\"$boot_hex\" CART_ROM_FILE=\"$cart_hex\" SD_MODE=$sd_mode" [current_fileset]

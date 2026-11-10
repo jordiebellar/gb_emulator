@@ -154,10 +154,8 @@ module gb_top #(
         .sel_joypad (sel_joypad),                   .joypad_data_out (joypad_data_out),
         .sel_serial (sel_serial),                   .serial_data_out (8'hFF),
         .sel_timer (sel_timer),                     .timer_data_out (timer_data_out),
-        .sel_interrupt_ctrl (sel_interrupt_ctrl),   .interrupt_ctrl_data_out (ic_data_out),
-        .sel_apu (sel_apu),                         .apu_data_out (apu_rdata),
         .sel_interrupt_ctrl (sel_interrupt_ctrl),   .interrupt_ctrl_data_out (ic_view),
-        .sel_apu (sel_apu),                         .apu_data_out (8'hFF),
+        .sel_apu (sel_apu),                         .apu_data_out (apu_rdata),
         .sel_hram (sel_hram),                       .hram_data_out (hram_data_out)
     );
 
