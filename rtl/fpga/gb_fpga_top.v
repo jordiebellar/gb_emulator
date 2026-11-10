@@ -29,17 +29,27 @@
 //                  a simulation that runs from the repo root passes the long
 //                  paths in through the parameters instead.
 //
+//                  SD_MODE picks the cartridge. 0 is the rom in block ram, one
+//                  32 kb game baked into the bitstream, and the sd pins sit idle.
+//                  1 reads the game from a micro sd card in a pmod sd on header
+//                  JA, in spi mode, and supports mbc1, mbc3 and mbc5 carts. the
+//                  card holds the rom as a raw image from sector 0, no file
+//                  system. in that mode the leds show {sd error, bank 0 loaded,
+//                  card ready} on led15 to led13 and the cpu address on the rest.
+//
 //                  reset is held for 256 clocks at power up and for as long as
 //                  btnC is down. every input goes through a 2 flop
 //                  synchronizer before it reaches the machine.
-// Revision     : 1.1 - added the ps/2 keyboard input
+// Revision     : 1.2 - added the sd card cartridge
+//                  1.1 - added the ps/2 keyboard input
 //                  1.0 - initial implementation
 // =============================================================================
 `timescale 1ns / 1ps
 
 module gb_fpga_top #(
     parameter BOOT_ROM_FILE = "boot_rom.hex",
-    parameter CART_ROM_FILE = "cart_rom.hex"
+    parameter CART_ROM_FILE = "cart_rom.hex",
+    parameter integer SD_MODE = 0
 ) (
     input  wire        clk,
     input  wire        btnC,
@@ -50,6 +60,12 @@ module gb_fpga_top #(
     input  wire [3:0]  sw,
     input  wire        PS2Clk,
     input  wire        PS2Data,
+
+    // pmod sd on JA, top row - 1 cs, 2 mosi, 3 miso, 4 sck
+    output wire        sd_cs_n,
+    output wire        sd_sck,
+    output wire        sd_mosi,
+    input  wire        sd_miso,
 
     output wire [3:0]  vgaRed,
     output wire [3:0]  vgaGreen,
@@ -97,10 +113,13 @@ module gb_fpga_top #(
     // the machine
     // ------------------------------------------------------------------------
     wire [15:0] cpu_addr;
+    wire [2:0]  cart_status;
 
     gb_top #(
         .BOOT_ROM_FILE (BOOT_ROM_FILE),
-        .CART_ROM_FILE (CART_ROM_FILE)
+        .CART_ROM_FILE (CART_ROM_FILE),
+        .SD_MODE       (SD_MODE),
+        .RAM_BYTES     (SD_MODE != 0 ? 32768 : 8192)
     ) u_gb (
         .clk_100m   (clk),
         .rst        (rst),
@@ -120,6 +139,12 @@ module gb_fpga_top #(
         .vga_hsync  (Hsync),
         .vga_vsync  (Vsync),
 
+        .sd_cs_n     (sd_cs_n),
+        .sd_sck      (sd_sck),
+        .sd_mosi     (sd_mosi),
+        .sd_miso     (sd_miso),
+        .cart_status (cart_status),
+
         .lcd_on             (),
         .debug_cpu_addr     (cpu_addr),
         .debug_cpu_data_out (),
@@ -130,6 +155,6 @@ module gb_fpga_top #(
         .debug_dma_active   ()
     );
 
-    assign led = cpu_addr;
+    assign led = (SD_MODE != 0) ? {cart_status, cpu_addr[12:0]} : cpu_addr;
 
 endmodule

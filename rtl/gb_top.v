@@ -10,7 +10,8 @@
 //                  commits its own write on sel && we && ce_m.
 //
 //                  peripherals on the bus
-//                    - cartridge, boot rom overlay plus 32kb rom
+//                    - cartridge, boot rom overlay, the game rom (block ram or an
+//                      sd card), the mapper and cart ram
 //                    - wram and hram
 //                    - ppu, vram oam and the ppu registers, plus video
 //                    - oam dma unit at ff46
@@ -31,7 +32,8 @@
 //                  c0-df in the dma unit). pages 80-bf read ff, vram as a
 //                  dma source is not supported because the ppu has one
 //                  address port.
-// Revision     : 2.0 - rewritten for contract rev 2. cpu with ce_m, ppu and
+// Revision     : 2.1 - sd card cartridge, mapper, clock enable hold
+//                  2.0 - rewritten for contract rev 2. cpu with ce_m, ppu and
 //                  video, oam dma steering, interrupt_ctrl, timer, joypad.
 //                  1.0 - first integration, cpu on the raw clock
 // =============================================================================
@@ -40,7 +42,16 @@
 module gb_top #(
     parameter BOOT_ROM_FILE = "roms/boot/boot_rom.hex",
     parameter CART_ROM_FILE = "roms/game/cart_rom.hex",
-    parameter GREEN         = 1
+    parameter GREEN         = 1,
+    // cartridge, see cartridge.v. the defaults are the old 32kb rom in block ram
+    parameter integer SD_MODE     = 0,
+    parameter integer ROM_BYTES   = 32768,
+    parameter integer RAM_BYTES   = 8192,
+    parameter integer CACHE_LINES = 64,
+    parameter [15:0]  SD_DIV_SLOW = 16'd125,
+    parameter [15:0]  SD_DIV_FAST = 16'd2,
+    parameter integer SD_PWR_CLKS = 100000,
+    parameter integer RTC_TICKS   = 100000000
 ) (
     input  wire        clk_100m,
     input  wire        rst,
@@ -64,6 +75,13 @@ module gb_top #(
 
     output wire        lcd_on,
 
+    // sd card cartridge, idle when SD_MODE is 0
+    output wire        sd_cs_n,
+    output wire        sd_sck,
+    output wire        sd_mosi,
+    input  wire        sd_miso,
+    output wire [2:0]  cart_status,
+
     // debug
     output wire [15:0] debug_cpu_addr,
     output wire [7:0]  debug_cpu_data_out,
@@ -78,9 +96,10 @@ module gb_top #(
     // clocks
     // ------------------------------------------------------------------------
     wire ce_gb, ce_m, ce_vga;
+    wire cart_stall;
 
     clk_div u_clk_div (
-        .clk_100m (clk_100m), .rst (rst),
+        .clk_100m (clk_100m), .rst (rst), .hold (cart_stall),
         .ce_gb (ce_gb), .ce_m (ce_m), .ce_vga (ce_vga)
     );
 
@@ -109,7 +128,7 @@ module gb_top #(
     wire sel_ppu_vram, sel_ppu_oam, sel_ppu_reg, sel_oam_dma;
     wire sel_joypad, sel_serial, sel_timer, sel_interrupt_ctrl, sel_apu, sel_hram;
 
-    wire [7:0] cart_data_out, wram_data_out, hram_data_out;
+    wire [7:0] cart_data_out, cart_ram_data_out, wram_data_out, hram_data_out;
     wire [7:0] ppu_vram_data_out, ppu_oam_data_out, ppu_reg_data_out;
     wire [7:0] oam_dma_data_out, joypad_data_out, timer_data_out, ic_data_out, ic_view;
     wire [7:0] mm_data_in;
@@ -120,7 +139,7 @@ module gb_top #(
         .sel_cart_rom (sel_cart_rom),               .cart_rom_data_out (cart_data_out),
         // the cartridge answers ff on its own boot disable select
         .sel_boot_disable (sel_boot_disable),       .boot_disable_data_out (8'hFF),
-        .sel_cart_ram (sel_cart_ram),               .cart_ram_data_out (8'hFF),
+        .sel_cart_ram (sel_cart_ram),               .cart_ram_data_out (cart_ram_data_out),
         .sel_wram (sel_wram),                       .wram_data_out (wram_data_out),
         .sel_ppu_vram (sel_ppu_vram),               .ppu_vram_data_out (ppu_vram_data_out),
         .sel_ppu_oam (sel_ppu_oam),                 .ppu_oam_data_out (ppu_oam_data_out),
@@ -180,13 +199,26 @@ module gb_top #(
     // ------------------------------------------------------------------------
     // memory
     // ------------------------------------------------------------------------
+    // a rom read is in progress, from the cpu or from the dma unit. writes into
+    // the rom space are mapper writes, and only the cpu makes them
+    wire cart_rom_rd = dma_active ? dma_src_rom : (sel_cart_rom & ~cpu_we);
+    wire cart_mbc_wr = cpu_we & sel_cart_rom & ~dma_active;
+    wire cart_ram_we = cpu_we & ~dma_active;
+
     cartridge #(
-        .BOOT_ROM_FILE (BOOT_ROM_FILE), .CART_ROM_FILE (CART_ROM_FILE)
+        .BOOT_ROM_FILE (BOOT_ROM_FILE), .CART_ROM_FILE (CART_ROM_FILE),
+        .SD_MODE (SD_MODE), .ROM_BYTES (ROM_BYTES), .RAM_BYTES (RAM_BYTES),
+        .CACHE_LINES (CACHE_LINES), .SD_DIV_SLOW (SD_DIV_SLOW), .SD_DIV_FAST (SD_DIV_FAST),
+        .SD_PWR_CLKS (SD_PWR_CLKS), .RTC_TICKS (RTC_TICKS)
     ) u_cartridge (
         .clk (clk_100m), .ce_gb (ce_gb), .ce_m (ce_m), .rst (rst),
-        .addr (mem_addr), .data_in (cpu_data_out), .we (cpu_we),
+        .addr (mem_addr), .cpu_addr (cpu_addr), .data_in (cpu_data_out), .we (cpu_we),
         .sel_cart_rom (cart_sel_rom_eff), .sel_boot_disable (sel_boot_disable),
-        .data_out (cart_data_out), .stall ()
+        .rom_rd (cart_rom_rd), .mbc_wr (cart_mbc_wr),
+        .sel_cart_ram (sel_cart_ram), .ram_we (cart_ram_we),
+        .data_out (cart_data_out), .ram_data_out (cart_ram_data_out), .stall (cart_stall),
+        .sd_cs_n (sd_cs_n), .sd_sck (sd_sck), .sd_mosi (sd_mosi), .sd_miso (sd_miso),
+        .status (cart_status)
     );
 
     wram u_wram (
