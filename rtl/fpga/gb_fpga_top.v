@@ -72,7 +72,9 @@ module gb_fpga_top #(
     output wire [3:0]  vgaBlue,
     output wire        Hsync,
     output wire        Vsync,
-    output wire [15:0] led
+    output wire [15:0] led,
+
+    output wire        audio_pin
 );
 
     // ------------------------------------------------------------------------
@@ -138,6 +140,8 @@ module gb_fpga_top #(
         .vga_b      (vgaBlue),
         .vga_hsync  (Hsync),
         .vga_vsync  (Vsync),
+
+        .audio_pin   (audio_pin),
 
         .sd_cs_n     (sd_cs_n),
         .sd_sck      (sd_sck),

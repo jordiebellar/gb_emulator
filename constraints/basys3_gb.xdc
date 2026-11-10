@@ -71,6 +71,9 @@ set_property -dict { PACKAGE_PIN J18 IOSTANDARD LVCMOS33 } [get_ports {vgaBlue[3
 set_property -dict { PACKAGE_PIN P19 IOSTANDARD LVCMOS33 } [get_ports Hsync]
 set_property -dict { PACKAGE_PIN R19 IOSTANDARD LVCMOS33 } [get_ports Vsync]
 
+## apu
+set_property -dict { PACKAGE_PIN A14 IOSTANDARD LVCMOS33 } [get_ports audio_pin]
+
 ## buttons and switches are asynchronous, gb_fpga_top runs them through a
 ## 2-flop synchronizer, and the ps/2 lines go through the filter in ps2_keys.
 ## the leds are only for looking at
