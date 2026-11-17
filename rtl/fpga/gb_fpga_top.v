@@ -53,7 +53,8 @@
 module gb_fpga_top #(
     parameter BOOT_ROM_FILE = "boot_rom.hex",
     parameter CART_ROM_FILE = "cart_rom.hex",
-    parameter integer SD_MODE = 0
+    parameter integer SD_MODE = 0,
+    parameter [15:0]  SD_DIV_FAST = 16'd4      // sd read clock half period, 4 is 12.5 mhz, 2 is 25 mhz
 ) (
     input  wire        clk,
     input  wire        btnC,
@@ -147,6 +148,7 @@ module gb_fpga_top #(
         .BOOT_ROM_FILE (BOOT_ROM_FILE),
         .CART_ROM_FILE (CART_ROM_FILE),
         .SD_MODE       (SD_MODE),
+        .SD_DIV_FAST   (SD_DIV_FAST),
         .RAM_BYTES     (SD_MODE != 0 ? 32768 : 8192)
     ) u_gb (
         .clk_100m   (clk),
