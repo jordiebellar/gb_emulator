@@ -70,7 +70,7 @@ module cartridge #(
     parameter [15:0]  SD_DIV_SLOW = 16'd125,
     parameter [15:0]  SD_DIV_FAST = 16'd2,
     parameter integer SD_PWR_CLKS = 100000,
-    parameter integer FL_HALF     = 4,
+    parameter integer FL_HALF     = 2,   // flash sck half period in clocks, 2 is 25 mhz
     parameter integer RTC_TICKS   = 100000000
 ) (
     input  wire        clk,

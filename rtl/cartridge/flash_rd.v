@@ -20,8 +20,9 @@
 //                  the rom image sits in the flash at BASE (0x300000), written
 //                  with write_cfgmem from the hardware manager. sector n is
 //                  the 512 bytes at BASE + n * 512, plain 0x03 read, one bit
-//                  wide. sck = 100 mhz / (2 * HALF), 12.5 mhz at HALF = 4
-//                  (the speed proven in flash_probe), 25 mhz at HALF = 2.
+//                  wide. sck = 100 mhz / (2 * HALF), 12.5 mhz at HALF = 4,
+//                  25 mhz at HALF = 2. miso is sampled late in the high half
+//                  so the delay from the sck pad and back is covered at 25 mhz
 //
 //                  after configuration the flash clock can only be driven
 //                  through STARTUPE2 (USRCCLKO). the first few clocks after
@@ -30,7 +31,9 @@
 //                  by the configuration read, so it then gets 0xFFFF and a
 //                  66/99 software reset before the id check. wp# and hold#
 //                  (dq2, dq3) are driven high by the top level.
-// Revision     : 1.0 - initial implementation
+// Revision     : 1.1 - miso sampled at the end of the high half, was the end of
+//                  the low half, which was too early at 25 mhz
+//                  1.0 - initial implementation
 // =============================================================================
 `timescale 1ns / 1ps
 
@@ -64,7 +67,7 @@ module flash_rd #(
 
     // ------------------------------------------------------------------------
     // bit engine. sends e_nt bits of e_cmd, then receives e_nr bits. spi mode 0,
-    // miso sampled at the end of the low half, just before sck rises
+    // miso sampled at the end of the high half, just before sck falls
     // ------------------------------------------------------------------------
     reg         e_start, e_cs, e_rd;
     reg  [31:0] e_cmd;
@@ -124,6 +127,13 @@ module flash_rd #(
                     hc <= 4'd0;
                     case (ph)
                         2'd0: begin                         // end of the low half
+                            sck <= 1'b1;
+                            ph  <= 2'd1;
+                        end
+                        2'd1: begin                         // end of the high half
+                            // the flash moves its data on the falling edge and holds
+                            // it to the next one, so the bit is sampled here, a clock
+                            // before sck falls, when it has long since arrived
                             if (idx >= {7'd0, nt}) begin
                                 rx <= {rx[22:0], miso_s};
                                 if (rden) begin
@@ -136,10 +146,6 @@ module flash_rd #(
                                     rb <= rb + 3'd1;
                                 end
                             end
-                            sck <= 1'b1;
-                            ph  <= 2'd1;
-                        end
-                        2'd1: begin                         // end of the high half
                             sck <= 1'b0;
                             sh  <= {sh[30:0], 1'b0};
                             idx <= idx + 13'd1;

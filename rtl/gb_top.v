@@ -92,7 +92,8 @@ module gb_top #(
     output wire [7:0]  debug_bus_data_in,
     output wire [7:0]  debug_ie,
     output wire [7:0]  debug_if_reg,
-    output wire        debug_dma_active
+    output wire        debug_dma_active,
+    output wire        debug_stall
 );
 
     // ------------------------------------------------------------------------
@@ -343,5 +344,6 @@ module gb_top #(
     assign debug_ie           = ie_wire;
     assign debug_if_reg       = if_reg_wire;
     assign debug_dma_active   = dma_active;
+    assign debug_stall        = cart_stall;
 
 endmodule
