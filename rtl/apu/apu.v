@@ -184,10 +184,22 @@ module apu (
     );
 
     // ---------------- mixer ----------------
-    wire [5:0] l_sum = ({6{nr51[4]}} & {2'b00, c1}) + ({6{nr51[5]}} & {2'b00, c2})
-                     + ({6{nr51[6]}} & {2'b00, c3}) + ({6{nr51[7]}} & {2'b00, c4});
-    wire [5:0] r_sum = ({6{nr51[0]}} & {2'b00, c1}) + ({6{nr51[1]}} & {2'b00, c2})
-                     + ({6{nr51[2]}} & {2'b00, c3}) + ({6{nr51[3]}} & {2'b00, c4});
+    // the channel outputs are registered before the mix. ch3 alone is a wave ram
+    // read, a nibble pick and a level shift ahead of the adders and the volume
+    // multiply, which did not fit one 100 mhz clock. every channel input moves
+    // on ce_gb or a register write, so one clock of latency is inaudible
+    reg [3:0] c1_q = 4'd0, c2_q = 4'd0, c3_q = 4'd0, c4_q = 4'd0;
+    always @(posedge clk) begin
+        c1_q <= c1;
+        c2_q <= c2;
+        c3_q <= c3;
+        c4_q <= c4;
+    end
+
+    wire [5:0] l_sum = ({6{nr51[4]}} & {2'b00, c1_q}) + ({6{nr51[5]}} & {2'b00, c2_q})
+                     + ({6{nr51[6]}} & {2'b00, c3_q}) + ({6{nr51[7]}} & {2'b00, c4_q});
+    wire [5:0] r_sum = ({6{nr51[0]}} & {2'b00, c1_q}) + ({6{nr51[1]}} & {2'b00, c2_q})
+                     + ({6{nr51[2]}} & {2'b00, c3_q}) + ({6{nr51[3]}} & {2'b00, c4_q});
     wire [8:0] l_mix = l_sum * ({1'b0, nr50[6:4]} + 4'd1);
     wire [8:0] r_mix = r_sum * ({1'b0, nr50[2:0]} + 4'd1);
 

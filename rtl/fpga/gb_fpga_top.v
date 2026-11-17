@@ -41,6 +41,13 @@
 //                  flash_rd.v. no card needed. same leds, {flash error, bank 0
 //                  loaded, flash ready}
 //
+//                  CACHE_LINES sizes the rom cache for modes 1 and 2, 64 lines is
+//                  32 kb. the cache is direct mapped on bank and offset, so a
+//                  small one makes banks of the same parity evict each other and
+//                  the machine stalls on every hop. 256 lines holds eight banks.
+//                  CART_RAM_BYTES sizes the cart ram, 8192 is enough for most
+//                  games and frees block ram for a bigger cache
+//
 //                  reset is held for 256 clocks at power up and for as long as
 //                  btnC is down. every input goes through a 2 flop
 //                  synchronizer before it reaches the machine.
@@ -53,7 +60,10 @@
 module gb_fpga_top #(
     parameter BOOT_ROM_FILE = "boot_rom.hex",
     parameter CART_ROM_FILE = "cart_rom.hex",
-    parameter integer SD_MODE = 0
+    parameter integer SD_MODE = 0,
+    parameter integer STALL_METER = 0,
+    parameter integer CACHE_LINES = 64,     // 512 byte lines of rom cache in SD_MODE 1 and 2
+    parameter integer CART_RAM_BYTES = 0    // 0 picks 32768 in SD modes, 8192 otherwise
 ) (
     input  wire        clk,
     input  wire        btnC,
@@ -129,6 +139,7 @@ module gb_fpga_top #(
     // ------------------------------------------------------------------------
     wire [15:0] cpu_addr;
     wire [2:0]  cart_status;
+    wire        stall_dbg;
 
     // the cartridge's spi pins go to the sd pmod, or to the flash in SD_MODE 2
     localparam FLASH = (SD_MODE == 2);
@@ -147,7 +158,8 @@ module gb_fpga_top #(
         .BOOT_ROM_FILE (BOOT_ROM_FILE),
         .CART_ROM_FILE (CART_ROM_FILE),
         .SD_MODE       (SD_MODE),
-        .RAM_BYTES     (SD_MODE != 0 ? 32768 : 8192)
+        .CACHE_LINES   (CACHE_LINES),
+        .RAM_BYTES     ((CART_RAM_BYTES != 0) ? CART_RAM_BYTES : (SD_MODE != 0 ? 32768 : 8192))
     ) u_gb (
         .clk_100m   (clk),
         .rst        (rst),
@@ -182,9 +194,26 @@ module gb_fpga_top #(
         .debug_bus_data_in  (),
         .debug_ie           (),
         .debug_if_reg       (),
-        .debug_dma_active   ()
+        .debug_dma_active   (),
+        .debug_stall        (stall_dbg)
     );
 
-    assign led = (SD_MODE != 0) ? {cart_status, cpu_addr[12:0]} : cpu_addr;
+    // stall meter, a bring up aid. STALL_METER = 1 replaces the leds with a bar
+    // that shows how much of the time the cartridge is holding the machine, in
+    // sixteenths, over a 0.34 s window. no leds lit is under 6 percent, 8 lit
+    // is about half the time stalled
+    reg [24:0] m_win = 25'd0;
+    reg [24:0] m_cnt = 25'd0;
+    reg [15:0] m_bar = 16'd0;
+
+    always @(posedge clk) begin
+        m_win <= m_win + 25'd1;
+        if (m_win == 25'd0) m_cnt <= {24'd0, stall_dbg};
+        else if (stall_dbg) m_cnt <= m_cnt + 25'd1;
+        if (m_win == {25{1'b1}}) m_bar <= (17'd1 << m_cnt[24:21]) - 17'd1;
+    end
+
+    assign led = (STALL_METER != 0) ? m_bar :
+                 (SD_MODE != 0)     ? {cart_status, cpu_addr[12:0]} : cpu_addr;
 
 endmodule
